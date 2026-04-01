@@ -86,6 +86,23 @@ scherlok watch --exit-code
 
 Alerts include: **what** changed, **when**, **how much** it deviated, and **suggested action**.
 
+## Remote Storage
+
+Profiles are stored locally by default (`~/.scherlok/profiles.db`). For CI/CD and shared environments, store them in the cloud:
+
+```bash
+# AWS S3
+scherlok config --store s3://my-bucket/scherlok/profiles.db
+
+# Google Cloud Storage
+scherlok config --store gs://my-bucket/scherlok/profiles.db
+
+# Azure Blob Storage
+scherlok config --store az://my-container/scherlok/profiles.db
+```
+
+Scherlok downloads the profiles before each run and uploads them back after. Same SQLite engine, just synced to the cloud. Also supports the `SCHERLOK_STORE` environment variable.
+
 ## CI/CD Integration
 
 Use Scherlok as a data quality gate in your pipeline:
@@ -96,10 +113,11 @@ Use Scherlok as a data quality gate in your pipeline:
   run: |
     pip install scherlok
     scherlok connect ${{ secrets.DATABASE_URL }}
+    scherlok config --store s3://${{ secrets.S3_BUCKET }}/scherlok/profiles.db
     scherlok watch --exit-code --fail-on critical
 ```
 
-If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
+If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production. Profiles persist across runs via remote storage.
 
 ## Connectors
 
@@ -148,12 +166,13 @@ scherlok report
 ## CLI Reference
 
 ```bash
-scherlok connect <url>     # Save database connection
-scherlok investigate       # Profile all tables
-scherlok watch             # Detect anomalies
-scherlok report            # Show profile summary
-scherlok status            # Show table health overview
-scherlok version           # Show version
+scherlok connect <url>       # Save database connection
+scherlok config --store <url> # Set remote storage (s3://, gs://, az://)
+scherlok investigate         # Profile all tables
+scherlok watch               # Detect anomalies
+scherlok report              # Show profile summary
+scherlok status              # Show table health overview
+scherlok version             # Show version
 ```
 
 ## Contributing
