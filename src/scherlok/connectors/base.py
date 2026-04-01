@@ -32,7 +32,7 @@ class BaseConnector(ABC):
 
     @abstractmethod
     def get_column_stats(self, table: str, column: str) -> dict:
-        """Return column statistics: mean, stddev, min, max, null_count, distinct_count, top_values."""
+        """Return column statistics: mean, stddev, min, max, null_count, etc."""
         ...
 
     @abstractmethod

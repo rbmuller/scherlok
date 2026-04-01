@@ -1,6 +1,5 @@
 """CLI entry point for Scherlok. Built with Typer and Rich."""
 
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -13,7 +12,6 @@ from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
-from scherlok.detector.severity import Severity
 from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema

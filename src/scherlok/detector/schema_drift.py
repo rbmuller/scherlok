@@ -1,6 +1,6 @@
 """Schema change detection — added/removed columns, type changes."""
 
-from scherlok.detector.severity import Severity, classify_schema_drift
+from scherlok.detector.severity import classify_schema_drift
 
 
 def detect_schema_drift(
