@@ -16,6 +16,7 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
+from scherlok.store.remote import sync_context
 from scherlok.store.sqlite import ProfileStore
 
 app = typer.Typer(
@@ -70,6 +71,29 @@ def connect(
 
 
 @app.command()
+def config(
+    store: str = typer.Option(
+        None, "--store", help="Remote store URL (s3://, gs://, az://)"
+    ),
+) -> None:
+    """Configure Scherlok settings.
+
+    Example:
+        scherlok config --store s3://my-bucket/scherlok/profiles.db
+        scherlok config --store gs://my-bucket/scherlok/profiles.db
+        scherlok config --store az://my-container/scherlok/profiles.db
+    """
+    cfg = ScherlokConfig.load()
+    if store is not None:
+        cfg.settings["store"] = store
+        cfg.save()
+        console.print(f"[green]Store set to:[/green] {store}")
+    else:
+        current = cfg.settings.get("store") or "local (~/.scherlok/)"
+        console.print(f"Current store: [cyan]{current}[/cyan]")
+
+
+@app.command()
 def investigate() -> None:
     """Profile all tables and store results.
 
@@ -77,32 +101,38 @@ def investigate() -> None:
         scherlok investigate
     """
     connector = _get_connector_or_exit()
-    store = ProfileStore()
-    tables = connector.list_tables()
+    cfg = ScherlokConfig.load()
 
-    if not tables:
-        console.print("[yellow]No tables found.[/yellow]")
-        raise typer.Exit(code=0)
+    from scherlok.config import PROFILES_DB
+    with sync_context(cfg.get_store(), PROFILES_DB):
+        store = ProfileStore()
+        tables = connector.list_tables()
 
-    console.print(f"Investigating [bold]{len(tables)}[/bold] tables...")
+        if not tables:
+            console.print("[yellow]No tables found.[/yellow]")
+            raise typer.Exit(code=0)
 
-    for table in tables:
-        console.print(f"  Profiling [cyan]{table}[/cyan]...")
+        console.print(f"Investigating [bold]{len(tables)}[/bold] tables...")
 
-        vol = profile_volume(connector, table)
-        store.save_profile(table, "volume", vol)
+        for table in tables:
+            console.print(f"  Profiling [cyan]{table}[/cyan]...")
 
-        sch = profile_schema(connector, table)
-        store.save_profile(table, "schema", sch)
+            vol = profile_volume(connector, table)
+            store.save_profile(table, "volume", vol)
 
-        fresh = profile_freshness(connector, table)
-        store.save_profile(table, "freshness", fresh)
+            sch = profile_schema(connector, table)
+            store.save_profile(table, "schema", sch)
 
-        for col in sch.get("columns", []):
-            dist = profile_distribution(connector, table, col["name"])
-            store.save_profile(table, f"distribution:{col['name']}", dist)
+            fresh = profile_freshness(connector, table)
+            store.save_profile(table, "freshness", fresh)
 
-    console.print(f"[green]Investigation complete.[/green] {len(tables)} tables profiled.")
+            for col in sch.get("columns", []):
+                dist = profile_distribution(connector, table, col["name"])
+                store.save_profile(table, f"distribution:{col['name']}", dist)
+
+        console.print(
+            f"[green]Investigation complete.[/green] {len(tables)} tables profiled."
+        )
 
 
 @app.command()
@@ -111,34 +141,41 @@ def watch() -> None:
 
     Example:
         scherlok watch
+        scherlok watch --slack https://hooks.slack.com/...
     """
     connector = _get_connector_or_exit()
-    store = ProfileStore()
-    tables = connector.list_tables()
-    all_anomalies: list[dict] = []
+    cfg = ScherlokConfig.load()
 
-    console.print(f"Watching [bold]{len(tables)}[/bold] tables...")
+    from scherlok.config import PROFILES_DB
+    with sync_context(cfg.get_store(), PROFILES_DB):
+        store = ProfileStore()
+        tables = connector.list_tables()
+        all_anomalies: list[dict] = []
 
-    for table in tables:
-        current_vol = profile_volume(connector, table)
-        stored_vol = store.get_latest_profile(table, "volume")
-        if stored_vol:
-            anomalies = detect_volume_anomalies(table, current_vol, stored_vol)
-            all_anomalies.extend(anomalies)
+        console.print(f"Watching [bold]{len(tables)}[/bold] tables...")
 
-        current_sch = profile_schema(connector, table)
-        stored_sch = store.get_latest_profile(table, "schema")
-        if stored_sch:
-            drifts = detect_schema_drift(table, current_sch, stored_sch)
-            all_anomalies.extend(drifts)
+        for table in tables:
+            current_vol = profile_volume(connector, table)
+            stored_vol = store.get_latest_profile(table, "volume")
+            if stored_vol:
+                anomalies = detect_volume_anomalies(
+                    table, current_vol, stored_vol
+                )
+                all_anomalies.extend(anomalies)
 
-        store.save_profile(table, "volume", current_vol)
-        store.save_profile(table, "schema", current_sch)
+            current_sch = profile_schema(connector, table)
+            stored_sch = store.get_latest_profile(table, "schema")
+            if stored_sch:
+                drifts = detect_schema_drift(table, current_sch, stored_sch)
+                all_anomalies.extend(drifts)
 
-    if all_anomalies:
-        print_anomalies(all_anomalies)
-    else:
-        console.print("[green]No anomalies detected.[/green]")
+            store.save_profile(table, "volume", current_vol)
+            store.save_profile(table, "schema", current_sch)
+
+        if all_anomalies:
+            print_anomalies(all_anomalies)
+        else:
+            console.print("[green]No anomalies detected.[/green]")
 
     raise typer.Exit(code=exit_code_for(all_anomalies))
 

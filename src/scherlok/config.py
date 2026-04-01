@@ -15,12 +15,15 @@ CONFIG_FILE = SCHERLOK_DIR / "config.json"
 PROFILES_DB = SCHERLOK_DIR / "profiles.db"
 ENV_CONNECTION = "SCHERLOK_CONNECTION"
 
+ENV_STORE = "SCHERLOK_STORE"
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "z_score_threshold": 3.0,
     "volume_critical_drop_pct": 50,
     "volume_warning_drop_pct": 20,
     "freshness_tolerance_hours": 24,
     "slack_webhook_url": None,
+    "store": None,
 }
 
 
@@ -50,3 +53,7 @@ class ScherlokConfig:
     def get_connection_string(self) -> str:
         """Return connection string from env var or config file."""
         return os.environ.get(ENV_CONNECTION, self.connection_string)
+
+    def get_store(self) -> str | None:
+        """Return remote store URL from env var or config."""
+        return os.environ.get(ENV_STORE, self.settings.get("store"))
