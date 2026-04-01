@@ -35,6 +35,5 @@ htmlcov/
 Thumbs.db
 
 # Scherlok local data
-docs/claude/tmp/
+docs/
 scripts/claude/tmp/
-.venv/
