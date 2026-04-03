@@ -59,11 +59,25 @@ class TestVolumeAnomalies:
         anomalies = detect_volume_anomalies("t", current, stored)
         assert len(anomalies) == 0
 
-    def test_no_anomaly_on_growth(self):
-        current = {"row_count": 2000, "timestamp": "2026-04-01T00:00:00"}
+    def test_no_anomaly_on_small_growth(self):
+        current = {"row_count": 1500, "timestamp": "2026-04-01T00:00:00"}
         stored = {"row_count": 1000, "timestamp": "2026-03-31T00:00:00"}
         anomalies = detect_volume_anomalies("t", current, stored)
-        assert len(anomalies) == 0
+        assert len(anomalies) == 0  # 50% growth is normal
+
+    def test_warning_on_spike(self):
+        current = {"row_count": 2500, "timestamp": "2026-04-01T00:00:00"}
+        stored = {"row_count": 1000, "timestamp": "2026-03-31T00:00:00"}
+        anomalies = detect_volume_anomalies("t", current, stored)
+        assert len(anomalies) == 1
+        assert anomalies[0]["type"] == "volume_spike"
+
+    def test_critical_on_huge_spike(self):
+        current = {"row_count": 5000, "timestamp": "2026-04-01T00:00:00"}
+        stored = {"row_count": 1000, "timestamp": "2026-03-31T00:00:00"}
+        anomalies = detect_volume_anomalies("t", current, stored)
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"].value == "CRITICAL"
 
 
 class TestSchemaDrift:

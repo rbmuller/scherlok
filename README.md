@@ -166,14 +166,24 @@ scherlok report
 ## CLI Reference
 
 ```bash
-scherlok connect <url>       # Save database connection
+scherlok connect <url>        # Save database connection
 scherlok config --store <url> # Set remote storage (s3://, gs://, az://)
-scherlok investigate         # Profile all tables
-scherlok watch               # Detect anomalies
-scherlok report              # Show profile summary
-scherlok status              # Show table health overview
-scherlok version             # Show version
+scherlok investigate          # Profile all tables
+scherlok watch                # Detect anomalies and alert
+scherlok status               # Show table health overview
+scherlok history              # Show timeline of past anomalies
+scherlok report               # Show profile summary
+scherlok version              # Show version
 ```
+
+### When to use each command
+
+| Command | Purpose | Analogy |
+|---------|---------|---------|
+| `status` | Quick health dashboard — OK/WARNING/CRITICAL per table | Glance at the car dashboard |
+| `watch` | Full investigation — detects anomalies, saves history, sends alerts, returns exit code for CI/CD | Take the car to the mechanic |
+| `history` | Timeline of all past anomalies — when, what, how severe | Check the car's service history |
+| `report` | Detailed profile of each table — rows, columns, types, freshness | Read the car's spec sheet |
 
 ## Contributing
 
@@ -186,4 +196,4 @@ We're especially looking for:
 
 ## License
 
-[MIT](LICENSE) — Robson Muller, 2026
+[MIT](LICENSE) — Robson Bayer Müller, 2026

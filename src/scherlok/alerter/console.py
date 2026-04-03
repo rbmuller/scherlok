@@ -40,6 +40,7 @@ def print_profile_summary(
     volume: dict | None,
     schema: dict | None,
     freshness: dict | None,
+    anomaly_count: int = 0,
 ) -> None:
     """Print a profile summary for a single table."""
     console.print(f"\n[bold cyan]{table}[/bold cyan]")
@@ -62,3 +63,8 @@ def print_profile_summary(
         hours = freshness.get("hours_since_update")
         hours_str = f"{hours:.1f}h ago" if hours is not None else "unknown"
         console.print(f"  Freshness: {hours_str} (last: {last_mod})")
+
+    if anomaly_count > 0:
+        console.print(f"  Anomalies: [red]{anomaly_count} detected[/red] (run [bold]scherlok history[/bold] for details)")
+    else:
+        console.print("  Anomalies: [green]0[/green]")

@@ -25,6 +25,22 @@ CREATE INDEX IF NOT EXISTS idx_profiles_lookup
 ON profiles (table_name, profile_type, created_at DESC)
 """
 
+CREATE_ANOMALIES_SQL = """
+CREATE TABLE IF NOT EXISTS anomalies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    anomaly_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    message TEXT NOT NULL,
+    detected_at TEXT NOT NULL
+)
+"""
+
+CREATE_ANOMALIES_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_anomalies_lookup
+ON anomalies (table_name, detected_at DESC)
+"""
+
 
 class ProfileStore:
     """SQLite-backed storage for data profiles."""
@@ -40,6 +56,8 @@ class ProfileStore:
         """Create tables and indexes if they don't exist."""
         self._conn.execute(CREATE_TABLE_SQL)
         self._conn.execute(CREATE_INDEX_SQL)
+        self._conn.execute(CREATE_ANOMALIES_SQL)
+        self._conn.execute(CREATE_ANOMALIES_INDEX_SQL)
         self._conn.commit()
 
     def save_profile(self, table_name: str, profile_type: str, data: dict) -> None:
@@ -85,6 +103,38 @@ class ProfileStore:
         ).fetchall()
         return [
             {**json.loads(row["data"]), "_created_at": row["created_at"]}
+            for row in rows
+        ]
+
+    def save_anomalies(self, anomalies: list[dict]) -> None:
+        """Save detected anomalies to history."""
+        now = datetime.now(timezone.utc).isoformat()
+        for a in anomalies:
+            self._conn.execute(
+                "INSERT INTO anomalies (table_name, anomaly_type, severity, message, detected_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (a["table"], a["type"], a["severity"].value, a["message"], now),
+            )
+        self._conn.commit()
+
+    def get_anomaly_history(self, days: int = 30) -> list[dict[str, Any]]:
+        """Get anomaly history for the last N days."""
+        cutoff = datetime.now(timezone.utc).isoformat()
+        rows = self._conn.execute(
+            "SELECT table_name, anomaly_type, severity, message, detected_at "
+            "FROM anomalies "
+            "WHERE detected_at >= datetime(?, '-' || ? || ' days') "
+            "ORDER BY detected_at DESC",
+            (cutoff, days),
+        ).fetchall()
+        return [
+            {
+                "table": row["table_name"],
+                "type": row["anomaly_type"],
+                "severity": row["severity"],
+                "message": row["message"],
+                "detected_at": row["detected_at"],
+            }
             for row in rows
         ]
 

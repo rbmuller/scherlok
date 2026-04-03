@@ -173,6 +173,7 @@ def watch() -> None:
             store.save_profile(table, "schema", current_sch)
 
         if all_anomalies:
+            store.save_anomalies(all_anomalies)
             print_anomalies(all_anomalies)
         else:
             console.print("[green]No anomalies detected.[/green]")
@@ -195,11 +196,14 @@ def report() -> None:
         console.print("[yellow]No tables found.[/yellow]")
         raise typer.Exit(code=0)
 
+    all_anomalies = store.get_anomaly_history(days=30)
+
     for table in tables:
         vol = store.get_latest_profile(table, "volume")
         sch = store.get_latest_profile(table, "schema")
         fresh = store.get_latest_profile(table, "freshness")
-        print_profile_summary(table, vol, sch, fresh)
+        table_anomaly_count = sum(1 for a in all_anomalies if a["table"] == table)
+        print_profile_summary(table, vol, sch, fresh, anomaly_count=table_anomaly_count)
 
 
 @app.command()
@@ -222,14 +226,69 @@ def status() -> None:
 
     for table in tables:
         vol = store.get_latest_profile(table, "volume")
+        stored_vol = store.get_profile_history(table, "volume")
         sch = store.get_latest_profile(table, "schema")
+        stored_sch = store.get_latest_profile(table, "schema")
 
         row_count = str(vol["row_count"]) if vol else "—"
         col_count = str(len(sch["columns"])) if sch else "—"
         last_profiled = vol.get("timestamp", "—") if vol else "—"
-        health = "[green]OK[/green]" if vol else "[yellow]Not profiled[/yellow]"
+
+        if not vol:
+            health = "[yellow]Not profiled[/yellow]"
+        else:
+            # Run quick anomaly check against current state
+            current_vol = profile_volume(connector, table)
+            current_sch = profile_schema(connector, table)
+            table_anomalies = detect_volume_anomalies(table, current_vol, vol)
+            table_anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
+            if any(a["severity"].value == "CRITICAL" for a in table_anomalies):
+                health = "[red]CRITICAL[/red]"
+            elif any(a["severity"].value == "WARNING" for a in table_anomalies):
+                health = "[yellow]WARNING[/yellow]"
+            else:
+                health = "[green]OK[/green]"
 
         tbl.add_row(table, row_count, col_count, str(last_profiled), health)
+
+    console.print(tbl)
+
+
+@app.command()
+def history(
+    days: int = typer.Option(30, "--days", "-d", help="Number of days to look back"),
+) -> None:
+    """Show timeline of detected anomalies.
+
+    Example:
+        scherlok history
+        scherlok history --days 7
+    """
+    store = ProfileStore()
+    records = store.get_anomaly_history(days=days)
+
+    if not records:
+        console.print(f"[green]No anomalies in the last {days} days.[/green]")
+        raise typer.Exit(code=0)
+
+    tbl = Table(title=f"Anomaly History (last {days} days)")
+    tbl.add_column("Detected At")
+    tbl.add_column("Severity")
+    tbl.add_column("Table", style="cyan")
+    tbl.add_column("Type")
+    tbl.add_column("Message")
+
+    for r in records:
+        sev = r["severity"]
+        if sev == "CRITICAL":
+            sev_styled = "[red]CRITICAL[/red]"
+        elif sev == "WARNING":
+            sev_styled = "[yellow]WARNING[/yellow]"
+        else:
+            sev_styled = f"[dim]{sev}[/dim]"
+
+        detected = r["detected_at"][:19].replace("T", " ")
+        tbl.add_row(detected, sev_styled, r["table"], r["type"], r["message"])
 
     console.print(tbl)
 
