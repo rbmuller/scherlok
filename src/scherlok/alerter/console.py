@@ -65,6 +65,9 @@ def print_profile_summary(
         console.print(f"  Freshness: {hours_str} (last: {last_mod})")
 
     if anomaly_count > 0:
-        console.print(f"  Anomalies: [red]{anomaly_count} detected[/red] (run [bold]scherlok history[/bold] for details)")
+        console.print(
+            f"  Anomalies: [red]{anomaly_count} detected[/red] "
+            "(run [bold]scherlok history[/bold] for details)"
+        )
     else:
         console.print("  Anomalies: [green]0[/green]")

@@ -226,9 +226,7 @@ def status() -> None:
 
     for table in tables:
         vol = store.get_latest_profile(table, "volume")
-        stored_vol = store.get_profile_history(table, "volume")
         sch = store.get_latest_profile(table, "schema")
-        stored_sch = store.get_latest_profile(table, "schema")
 
         row_count = str(vol["row_count"]) if vol else "—"
         col_count = str(len(sch["columns"])) if sch else "—"
@@ -241,7 +239,7 @@ def status() -> None:
             current_vol = profile_volume(connector, table)
             current_sch = profile_schema(connector, table)
             table_anomalies = detect_volume_anomalies(table, current_vol, vol)
-            table_anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
+            table_anomalies.extend(detect_schema_drift(table, current_sch, sch))
             if any(a["severity"].value == "CRITICAL" for a in table_anomalies):
                 health = "[red]CRITICAL[/red]"
             elif any(a["severity"].value == "WARNING" for a in table_anomalies):
