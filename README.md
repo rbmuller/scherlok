@@ -45,14 +45,14 @@ Three commands. Zero config. Works in 5 minutes.
 
 ## What It Detects
 
-| Anomaly | Example |
-|---------|---------|
-| **Volume drop** | Row count dropped 40% vs 7-day average |
-| **Freshness alert** | Table hasn't updated in 12h (normally updates every 2h) |
-| **Schema drift** | Column added, removed, or type changed |
-| **Distribution shift** | NULL rate jumped from 2% to 45% |
-| **Cardinality change** | Status column went from 5 unique values to 500 |
-| **Value range breach** | Amount column has negative values (never seen before) |
+| Anomaly | Example | Status |
+|---------|---------|--------|
+| **Volume drop/spike** | Row count dropped 40% or spiked 300% | ✅ |
+| **Freshness alert** | Table hasn't updated in 12h (normally updates every 2h) | ✅ |
+| **Schema drift** | Column added, removed, or type changed | ✅ |
+| **Nullability shift** | NULL rate jumped from 2% to 45% | ✅ |
+| **Distribution shift** | Column mean shifted 5+ standard deviations | ✅ |
+| **Cardinality change** | Status column went from 5 unique values to 500 | ✅ |
 
 Every anomaly is scored: **INFO**, **WARNING**, or **CRITICAL** — auto-calibrated, no thresholds to set.
 
