@@ -11,6 +11,10 @@ from scherlok.alerter.exitcode import exit_code_for
 from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.detector.anomaly import detect_volume_anomalies
+from scherlok.detector.cardinality import detect_cardinality_anomalies
+from scherlok.detector.distribution_shift import detect_distribution_shift
+from scherlok.detector.freshness import detect_freshness_anomalies
+from scherlok.detector.nullability import detect_nullability_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
 from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
@@ -155,22 +159,58 @@ def watch() -> None:
         console.print(f"Watching [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
+            # Volume detection
             current_vol = profile_volume(connector, table)
             stored_vol = store.get_latest_profile(table, "volume")
             if stored_vol:
-                anomalies = detect_volume_anomalies(
-                    table, current_vol, stored_vol
+                all_anomalies.extend(
+                    detect_volume_anomalies(table, current_vol, stored_vol)
                 )
-                all_anomalies.extend(anomalies)
 
+            # Schema drift detection
             current_sch = profile_schema(connector, table)
             stored_sch = store.get_latest_profile(table, "schema")
             if stored_sch:
-                drifts = detect_schema_drift(table, current_sch, stored_sch)
-                all_anomalies.extend(drifts)
+                all_anomalies.extend(
+                    detect_schema_drift(table, current_sch, stored_sch)
+                )
+
+            # Freshness detection
+            current_fresh = profile_freshness(connector, table)
+            stored_fresh = store.get_latest_profile(table, "freshness")
+            if stored_fresh:
+                all_anomalies.extend(
+                    detect_freshness_anomalies(table, current_fresh, stored_fresh)
+                )
+
+            # Per-column detection: nullability, distribution shift, cardinality
+            for col in (current_sch or {}).get("columns", []):
+                col_name = col["name"]
+                current_dist = profile_distribution(connector, table, col_name)
+                stored_dist = store.get_latest_profile(
+                    table, f"distribution:{col_name}"
+                )
+                if stored_dist:
+                    all_anomalies.extend(
+                        detect_nullability_anomalies(
+                            table, col_name, current_dist, stored_dist
+                        )
+                    )
+                    all_anomalies.extend(
+                        detect_distribution_shift(
+                            table, col_name, current_dist, stored_dist
+                        )
+                    )
+                    all_anomalies.extend(
+                        detect_cardinality_anomalies(
+                            table, col_name, current_dist, stored_dist
+                        )
+                    )
+                store.save_profile(table, f"distribution:{col_name}", current_dist)
 
             store.save_profile(table, "volume", current_vol)
             store.save_profile(table, "schema", current_sch)
+            store.save_profile(table, "freshness", current_fresh)
 
         if all_anomalies:
             store.save_anomalies(all_anomalies)
@@ -238,8 +278,14 @@ def status() -> None:
             # Run quick anomaly check against current state
             current_vol = profile_volume(connector, table)
             current_sch = profile_schema(connector, table)
+            current_fresh = profile_freshness(connector, table)
+            stored_fresh = store.get_latest_profile(table, "freshness")
             table_anomalies = detect_volume_anomalies(table, current_vol, vol)
             table_anomalies.extend(detect_schema_drift(table, current_sch, sch))
+            if stored_fresh:
+                table_anomalies.extend(
+                    detect_freshness_anomalies(table, current_fresh, stored_fresh)
+                )
             if any(a["severity"].value == "CRITICAL" for a in table_anomalies):
                 health = "[red]CRITICAL[/red]"
             elif any(a["severity"].value == "WARNING" for a in table_anomalies):
