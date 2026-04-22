@@ -1,0 +1,20 @@
+# Example: Run Scherlok against a local PostgreSQL database
+# Usage:
+#   docker compose up -d
+#   pip install scherlok
+#   scherlok connect postgres://scherlok:scherlok@localhost:5433/demo
+#   scherlok investigate
+#   scherlok status
+#   scherlok watch
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: scherlok
+      POSTGRES_PASSWORD: scherlok
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql
