@@ -202,4 +202,4 @@ We're especially looking for:
 
 ## License
 
-[MIT](LICENSE) — Developed by [Robson Bayer Muller](https://github.com/rbmuller)
+[MIT](LICENSE) — Developed by [Robson Bayer Müller](https://github.com/rbmuller)
