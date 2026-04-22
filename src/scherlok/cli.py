@@ -8,6 +8,7 @@ from rich.table import Table
 from scherlok import __version__
 from scherlok.alerter.console import print_anomalies, print_profile_summary
 from scherlok.alerter.exitcode import exit_code_for
+from scherlok.alerter.webhook import send_webhook
 from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.detector.anomaly import detect_volume_anomalies
@@ -140,12 +141,18 @@ def investigate() -> None:
 
 
 @app.command()
-def watch() -> None:
+def watch(
+    webhook: str = typer.Option(
+        None, "--webhook", "-w",
+        help="Webhook URL to send alerts (auto-detects Slack, Discord, Teams).",
+    ),
+) -> None:
     """Compare current state vs stored profile. Detect anomalies.
 
     Example:
         scherlok watch
-        scherlok watch --slack https://hooks.slack.com/...
+        scherlok watch --webhook https://hooks.slack.com/...
+        scherlok watch -w https://discord.com/api/webhooks/...
     """
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
@@ -215,6 +222,12 @@ def watch() -> None:
         if all_anomalies:
             store.save_anomalies(all_anomalies)
             print_anomalies(all_anomalies)
+            if webhook:
+                ok = send_webhook(webhook, all_anomalies)
+                if ok:
+                    console.print("[dim]Webhook sent.[/dim]")
+                else:
+                    console.print("[red]Webhook delivery failed.[/red]")
         else:
             console.print("[green]No anomalies detected.[/green]")
 
