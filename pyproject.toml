@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Robson Muller", email = "robson@tbdcdata.com" },
+    { name = "Robson Bayer Müller", email = "rbmuller91@gmail.com" },
 ]
 keywords = ["data-quality", "monitoring", "anomaly-detection", "data-engineering"]
 classifiers = [
