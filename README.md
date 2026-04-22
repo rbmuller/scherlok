@@ -7,7 +7,7 @@
 
 <br><br>
 
-<img src="assets/logo.svg" alt="Scherlok" width="100">
+<img src="assets/logo.svg" alt="Scherlok" width="160">
 
 <h1>Scherlok</h1>
 
