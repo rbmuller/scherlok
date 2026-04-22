@@ -14,14 +14,9 @@ Scherlok makes sure it doesn't happen next time.</p>
 
 </div>
 
-```bash
-pip install scherlok
-scherlok connect postgres://localhost/mydb
-scherlok investigate
-scherlok watch
-```
-
 <div align="center">
+
+<img src="examples/demo.svg" alt="Scherlok Demo" width="700">
 
 **Zero config. Zero YAML. Zero rules to write.**<br>
 Scherlok learns what "normal" looks like, then tells you when something changes.
