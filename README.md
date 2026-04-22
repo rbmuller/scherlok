@@ -7,19 +7,21 @@
 
 <br><br>
 
-# Scherlok
+<h1>Scherlok</h1>
 
-**Your data broke in production. Again.**<br>
-Scherlok makes sure it doesn't happen next time.
+<p><strong>Your data broke in production. Again.</strong><br>
+Scherlok makes sure it doesn't happen next time.</p>
 
-<br>
+</div>
 
+```bash
+pip install scherlok
+scherlok connect postgres://localhost/mydb
+scherlok investigate
+scherlok watch
 ```
-$ pip install scherlok
-$ scherlok connect postgres://localhost/mydb
-$ scherlok investigate
-$ scherlok watch
-```
+
+<div align="center">
 
 **Zero config. Zero YAML. Zero rules to write.**<br>
 Scherlok learns what "normal" looks like, then tells you when something changes.
@@ -200,4 +202,4 @@ We're especially looking for:
 
 ## License
 
-[MIT](LICENSE) — Built by [Robson Muller](https://github.com/rbmuller)
+[MIT](LICENSE) — Developed by [Robson Bayer Muller](https://github.com/rbmuller)
