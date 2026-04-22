@@ -1,35 +1,42 @@
 <div align="center">
 
-# 🔍 Scherlok
+<img src="https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white" alt="Python 3.10+">
+<img src="https://img.shields.io/pypi/v/scherlok?color=green" alt="PyPI">
+<img src="https://img.shields.io/github/license/rbmuller/scherlok" alt="MIT License">
+<a href="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml"><img src="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 
-**A detective for your data. Zero-config data quality monitoring.**
+<br><br>
 
-[![CI](https://github.com/rbmuller/scherlok/actions/workflows/ci.yml/badge.svg)](https://github.com/rbmuller/scherlok/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
+# Scherlok
+
+**Your data broke in production. Again.**<br>
+Scherlok makes sure it doesn't happen next time.
+
+<br>
+
+```
+$ pip install scherlok
+$ scherlok connect postgres://localhost/mydb
+$ scherlok investigate
+$ scherlok watch
+```
+
+**Zero config. Zero YAML. Zero rules to write.**<br>
+Scherlok learns what "normal" looks like, then tells you when something changes.
 
 </div>
 
 ---
 
-```bash
-pip install scherlok
-scherlok connect postgres://user:pass@host/db
-scherlok investigate    # profiles your data, learns the patterns
-scherlok watch          # alerts when something drifts
-```
-
-No YAML. No rules to write. No 50-line config files.
-
-Scherlok observes your data, learns what "normal" looks like, and tells you when something changes.
-
 ## The Problem
 
-Every data team has the same nightmare: bad data reaching production undetected.
+Every data team has the same nightmare:
 
-A source API silently changes from dollars to cents. A column starts returning NULLs. Row counts drop 40% on a Tuesday. Revenue dashboards show wrong numbers for 3 weeks before anyone notices.
+> A source API silently changes from **dollars to cents**. Revenue dashboards show wrong numbers for **3 weeks** before anyone notices.
+>
+> A column starts returning **NULLs**. A table stops updating. Row counts drop **40% on a Tuesday**. Nobody knows until the CEO asks why the report looks weird.
 
-Current tools require you to **define what "correct" looks like** before you can detect what's wrong. Hundreds of rules, tests, and assertions. And you still miss things — because you can't write rules for problems you haven't imagined yet.
+Current tools (Great Expectations, Soda, dbt tests) require you to **define what "correct" looks like** before you can detect what's wrong. Hundreds of rules. Dozens of YAML files. And you still miss things — because you can't write rules for problems you haven't imagined yet.
 
 ## The Solution
 
@@ -37,58 +44,104 @@ Scherlok takes the opposite approach: **learn first, then detect.**
 
 ```bash
 scherlok connect postgres://user:pass@host/db   # connect once
-scherlok investigate                              # profile your data
-scherlok watch --slack https://hooks.slack.com/...  # monitor and alert
+scherlok investigate                              # learn your data
+scherlok watch                                    # detect anomalies
 ```
 
-Three commands. Zero config. Works in 5 minutes.
+Three commands. Five minutes. Done.
 
-## What It Detects
+## What It Catches
 
-| Anomaly | Example | Status |
-|---------|---------|--------|
-| **Volume drop/spike** | Row count dropped 40% or spiked 300% | ✅ |
-| **Freshness alert** | Table hasn't updated in 12h (normally updates every 2h) | ✅ |
-| **Schema drift** | Column added, removed, or type changed | ✅ |
-| **Nullability shift** | NULL rate jumped from 2% to 45% | ✅ |
-| **Distribution shift** | Column mean shifted 5+ standard deviations | ✅ |
-| **Cardinality change** | Status column went from 5 unique values to 500 | ✅ |
+| Anomaly | What Happened | Severity |
+|---------|---------------|----------|
+| **Volume drop** | Row count dropped 40% overnight | CRITICAL |
+| **Volume spike** | 3x more rows than normal | WARNING |
+| **Freshness alert** | Table hasn't updated in 12h (normally every 2h) | CRITICAL |
+| **Schema drift** | Column removed or type changed | CRITICAL |
+| **NULL surge** | NULL rate jumped from 2% to 45% | WARNING |
+| **Distribution shift** | Column mean shifted 5+ standard deviations | WARNING |
+| **Cardinality explosion** | Status column went from 5 values to 500 | CRITICAL |
 
-Every anomaly is scored: **INFO**, **WARNING**, or **CRITICAL** — auto-calibrated, no thresholds to set.
+Every anomaly is auto-scored: **INFO**, **WARNING**, or **CRITICAL**. No thresholds to configure.
 
 ## How It Works
 
-### 1. Investigate
+### 1. `investigate` — Learn the patterns
 
 ```bash
-scherlok investigate
+$ scherlok investigate
+
+  Profiling 12 tables...
+  ✓ users         — 45,231 rows, 8 columns
+  ✓ orders        — 1,203,847 rows, 15 columns
+  ✓ products      — 892 rows, 12 columns
+  ...
+  Done. Profiles saved.
 ```
 
-Profiles every table: row counts, column types, distributions, nullability patterns, freshness cadence, cardinality. Stores the profile locally.
+Scherlok profiles every table: row counts, column types, NULL rates, value distributions, freshness cadence, cardinality. Stores everything locally in SQLite.
 
-### 2. Watch
+### 2. `watch` — Detect anomalies
 
 ```bash
-scherlok watch
+$ scherlok watch
+
+  Checking 12 tables against learned profiles...
+
+  🔴 CRITICAL  orders    volume_drop     Row count dropped 52% (1,203,847 → 578,412)
+  🟡 WARNING   users     null_increase   Column "email": NULL rate 2.1% → 18.7%
+  🔵 INFO      products  distribution    Column "price": mean shifted 3.2σ
+
+  3 anomalies detected. Exit code: 1
 ```
 
-Compares current state against learned profiles. Detects deviations using statistical methods (z-score). No manual thresholds needed.
-
-### 3. Alert
+### 3. Alert — Slack, CI/CD, or both
 
 ```bash
-# Slack
-scherlok watch --slack https://hooks.slack.com/...
+# Slack alerts
+scherlok watch --slack https://hooks.slack.com/services/...
 
-# CI/CD (exits 1 on CRITICAL)
-scherlok watch --exit-code
+# CI/CD gate (fails pipeline on CRITICAL)
+scherlok watch --exit-code --fail-on critical
 ```
 
-Alerts include: **what** changed, **when**, **how much** it deviated, and **suggested action**.
+## CI/CD Integration
+
+Use Scherlok as a data quality gate:
+
+```yaml
+# GitHub Actions
+- name: Data quality check
+  run: |
+    pip install scherlok
+    scherlok connect ${{ secrets.DATABASE_URL }}
+    scherlok watch --exit-code --fail-on critical
+```
+
+If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
+
+## Connectors
+
+```bash
+# PostgreSQL
+scherlok connect postgres://user:pass@host:5432/db
+
+# BigQuery
+pip install scherlok[bigquery]
+scherlok connect bigquery://project-id/dataset-name
+```
+
+| Database | Status |
+|----------|--------|
+| PostgreSQL | Available |
+| BigQuery | Available |
+| Snowflake | Coming soon |
+| MySQL | Coming soon |
+| DuckDB | Planned |
 
 ## Remote Storage
 
-Profiles are stored locally by default (`~/.scherlok/profiles.db`). For CI/CD and shared environments, store them in the cloud:
+Share profiles across CI runs and team members:
 
 ```bash
 # AWS S3
@@ -101,99 +154,50 @@ scherlok config --store gs://my-bucket/scherlok/profiles.db
 scherlok config --store az://my-container/scherlok/profiles.db
 ```
 
-Scherlok downloads the profiles before each run and uploads them back after. Same SQLite engine, just synced to the cloud. Also supports the `SCHERLOK_STORE` environment variable.
-
-## CI/CD Integration
-
-Use Scherlok as a data quality gate in your pipeline:
-
-```yaml
-# GitHub Actions
-- name: Check data quality
-  run: |
-    pip install scherlok
-    scherlok connect ${{ secrets.DATABASE_URL }}
-    scherlok config --store s3://${{ secrets.S3_BUCKET }}/scherlok/profiles.db
-    scherlok watch --exit-code --fail-on critical
-```
-
-If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production. Profiles persist across runs via remote storage.
-
-## Connectors
-
-| Database | Status |
-|----------|--------|
-| PostgreSQL | ✅ Available |
-| BigQuery | 🔜 Coming soon |
-| Snowflake | 🔜 Coming soon |
-| MySQL | 🔜 Planned |
-| DuckDB | 🔜 Planned |
-
 ## Why Not [Other Tool]?
 
-| | Great Expectations | Soda | Monte Carlo | Scherlok |
+| | Great Expectations | Soda | Monte Carlo | **Scherlok** |
 |---|---|---|---|---|
 | Setup time | Hours | 30 min | Weeks | **5 minutes** |
 | Config required | Hundreds of rules | YAML checks | Dashboard setup | **None** |
 | Anomaly detection | Manual thresholds | Paid feature | Yes | **Yes, free** |
-| Self-hosted | Yes | Limited | No (SaaS only) | **Yes** |
-| Price | Free | Freemium | $50-200K/year | **Free** |
+| Self-hosted | Yes | Limited | No (SaaS) | **Yes** |
+| CI/CD gate | Yes | Yes | No | **Yes** |
+| Price | Free | Freemium | $50-200K/yr | **Free, forever** |
+
+## CLI Reference
+
+```
+scherlok connect <url>          Connect to a database
+scherlok investigate            Profile all tables (learn patterns)
+scherlok watch                  Detect anomalies and alert
+scherlok status                 Quick health dashboard
+scherlok report                 Detailed profile summary
+scherlok history [--days N]     Timeline of past anomalies
+scherlok config --store <url>   Set remote storage
+scherlok version                Show version
+```
 
 ## Install
 
 ```bash
 pip install scherlok
+
+# With BigQuery support
+pip install scherlok[bigquery]
 ```
 
 Requires Python 3.10+.
 
-## Quick Start
-
-```bash
-# 1. Connect to your database
-scherlok connect postgres://user:pass@localhost:5432/mydb
-
-# 2. Profile your data
-scherlok investigate
-
-# 3. Check for anomalies
-scherlok watch
-
-# 4. See the profile summary
-scherlok report
-```
-
-## CLI Reference
-
-```bash
-scherlok connect <url>        # Save database connection
-scherlok config --store <url> # Set remote storage (s3://, gs://, az://)
-scherlok investigate          # Profile all tables
-scherlok watch                # Detect anomalies and alert
-scherlok status               # Show table health overview
-scherlok history              # Show timeline of past anomalies
-scherlok report               # Show profile summary
-scherlok version              # Show version
-```
-
-### When to use each command
-
-| Command | Purpose | Analogy |
-|---------|---------|---------|
-| `status` | Quick health dashboard — OK/WARNING/CRITICAL per table | Glance at the car dashboard |
-| `watch` | Full investigation — detects anomalies, saves history, sends alerts, returns exit code for CI/CD | Take the car to the mechanic |
-| `history` | Timeline of all past anomalies — when, what, how severe | Check the car's service history |
-| `report` | Detailed profile of each table — rows, columns, types, freshness | Read the car's spec sheet |
-
 ## Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 We're especially looking for:
-- New database connectors
+- New database connectors (Snowflake, MySQL, DuckDB)
 - Anomaly detection improvements
 - Documentation and examples
 
 ## License
 
-[MIT](LICENSE) — Robson Bayer Müller, 2026
+[MIT](LICENSE) — Built by [Robson Muller](https://github.com/rbmuller)

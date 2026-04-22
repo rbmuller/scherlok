@@ -8,6 +8,13 @@ CONNECTOR_SCHEMES: dict[str, type[BaseConnector]] = {
     "postgres": PostgresConnector,
 }
 
+# Optional connectors — register only if dependencies are installed
+try:
+    from scherlok.connectors.bigquery import BigQueryConnector
+    CONNECTOR_SCHEMES["bigquery"] = BigQueryConnector
+except ImportError:
+    pass  # google-cloud-bigquery not installed
+
 
 def get_connector(connection_string: str) -> BaseConnector:
     """Return the appropriate connector for a given connection string.
