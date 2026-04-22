@@ -11,7 +11,8 @@ def test_version_command():
     """Test that version command outputs the version string."""
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "0.1.0" in result.output
+    from scherlok import __version__
+    assert __version__ in result.output
 
 
 def test_help_shows_all_commands():
