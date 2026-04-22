@@ -97,12 +97,23 @@ $ scherlok watch
 ### 3. Alert — Slack, CI/CD, or both
 
 ```bash
-# Slack alerts
-scherlok watch --slack https://hooks.slack.com/services/...
+# Slack
+scherlok watch --webhook https://hooks.slack.com/services/...
+
+# Discord
+scherlok watch --webhook https://discord.com/api/webhooks/...
+
+# Microsoft Teams
+scherlok watch --webhook https://outlook.office.com/webhook/...
+
+# Any endpoint (generic JSON payload)
+scherlok watch --webhook https://my-api.com/alerts
 
 # CI/CD gate (fails pipeline on CRITICAL)
 scherlok watch --exit-code --fail-on critical
 ```
+
+Auto-detects Slack, Discord, and Teams from the URL and formats the payload accordingly. Any other URL receives a generic JSON payload.
 
 ## CI/CD Integration
 
@@ -169,7 +180,7 @@ scherlok config --store az://my-container/scherlok/profiles.db
 ```
 scherlok connect <url>          Connect to a database
 scherlok investigate            Profile all tables (learn patterns)
-scherlok watch                  Detect anomalies and alert
+scherlok watch [-w <url>]       Detect anomalies and alert
 scherlok status                 Quick health dashboard
 scherlok report                 Detailed profile summary
 scherlok history [--days N]     Timeline of past anomalies
