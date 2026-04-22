@@ -56,12 +56,12 @@
 - [x] Anomaly persistence — anomalies saved to SQLite for history tracking
 
 ### Week 7-8: Alerting
-- [ ] `scherlok watch --slack https://hooks.slack.com/...` — Slack notifications
+- [x] `scherlok watch --webhook <url>` — generic webhook (auto-detects Slack, Discord, Teams)
 - [x] `scherlok watch --exit-code` — exit 1 on CRITICAL (for CI/CD)
 - [x] Alert format: what changed, when, how much
 - [ ] `scherlok watch --schedule "0 6 * * *"` — built-in cron scheduler
 
-**Deliverable:** End-to-end flow works: connect → investigate → watch → alert on Slack.
+**Deliverable:** End-to-end flow works: connect → investigate → watch → alert on Slack/Discord/Teams.
 
 ---
 
@@ -70,16 +70,16 @@
 **Goal:** Public launch. First 100 stars.
 
 ### Week 9-10: UX polish
-- [ ] Beautiful terminal output (Rich library for colored tables, progress bars)
-- [ ] `scherlok status` — dashboard showing all monitored tables and their health
-- [ ] `scherlok history` — show anomaly timeline
+- [x] Beautiful terminal output (Rich library for colored tables, progress bars)
+- [x] `scherlok status` — dashboard showing all monitored tables and their health
+- [x] `scherlok history` — show anomaly timeline
 - [ ] Improve error messages (connection failures, permission issues)
 - [ ] Add `--verbose` and `--quiet` flags
 
 ### Week 11-12: Launch
-- [ ] Write README with GIF/screenshot of terminal output
-- [ ] Create demo video (60s, showing connect → investigate → detect anomaly)
-- [ ] Publish on PyPI: `pip install scherlok`
+- [x] Write README with animated SVG demo of terminal output
+- [x] Detective logo (AI-generated caricature)
+- [x] Publish on PyPI: `pip install scherlok` (v0.3.0)
 - [ ] Blog post on dev.to: "I Built a Zero-Config Data Quality Tool"
 - [ ] LinkedIn post from Robson's account
 - [ ] Reddit: r/dataengineering, r/python
@@ -96,13 +96,20 @@
 **Goal:** Support the 3 most popular data warehouses. First external contributors.
 
 ### Week 13-14: BigQuery connector
-- [ ] `scherlok connect bigquery://project.dataset`
-- [ ] Profile via INFORMATION_SCHEMA (fast, no full table scan)
+- [x] `scherlok connect bigquery://project/dataset`
+- [x] Profile via INFORMATION_SCHEMA (fast, no full table scan)
+- [x] Optional dependency: `pip install scherlok[bigquery]`
 - [ ] Cost-aware profiling (estimate query cost before running)
 - [ ] Test with real BigQuery data (Fevo client data as dogfood)
 
 ### Week 15-16: Snowflake connector + community
 - [ ] `scherlok connect snowflake://account/db/schema`
+- [ ] `scherlok ci` command — simplified CI/CD one-liner
+- [ ] Email alerter: `scherlok watch --email admin@company.com`
+- [ ] HTML dashboard: `scherlok dashboard --out report.html`
+- [ ] Issue templates (bug, feature, connector)
+- [ ] CHANGELOG.md
+- [ ] Automatic GitHub Release notes on tag
 - [ ] Create 10 "good first issue" labels on GitHub
 - [ ] Write CONTRIBUTING.md
 - [ ] Respond to all issues/PRs within 24h
