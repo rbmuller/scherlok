@@ -7,6 +7,8 @@
 
 <br><br>
 
+<img src="assets/logo.svg" alt="Scherlok" width="100">
+
 <h1>Scherlok</h1>
 
 <p><strong>Your data broke in production. Again.</strong><br>

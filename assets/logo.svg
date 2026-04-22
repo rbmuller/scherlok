@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <!-- Magnifying glass -->
+  <circle cx="52" cy="48" r="24" fill="none" stroke="#0d9488" stroke-width="4"/>
+  <line x1="70" y1="66" x2="90" y2="86" stroke="#0d9488" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Binary/data inside the lens -->
+  <text x="37" y="40" font-family="monospace" font-size="8" fill="#0d9488" opacity="0.6">01101</text>
+  <text x="37" y="50" font-family="monospace" font-size="8" fill="#0d9488" opacity="0.8">10010</text>
+  <text x="37" y="60" font-family="monospace" font-size="8" fill="#ef4444" font-weight="bold">ERR!</text>
+
+  <!-- Detective hat -->
+  <ellipse cx="52" cy="20" rx="20" ry="5" fill="#262626"/>
+  <path d="M36 20 Q36 8 52 8 Q68 8 68 20" fill="#262626"/>
+  <rect x="32" y="18" width="40" height="4" rx="2" fill="#262626"/>
+</svg>
