@@ -48,4 +48,4 @@
 [13.0, "o", "Column \"price\": mean shifted \u001b[34m3.2σ\u001b[0m\r\n"]
 [13.6, "o", "\r\n  \u001b[1m3 anomalies detected.\u001b[0m Exit code: \u001b[1;31m1\u001b[0m\r\n"]
 [14.5, "o", "\r\n\u001b[1;32m$\u001b[0m "]
-[16.0, "o", "\r\n"]
+[19.5, "o", " "]
