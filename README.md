@@ -139,13 +139,20 @@ scherlok connect postgres://user:pass@host:5432/db
 # BigQuery
 pip install scherlok[bigquery]
 scherlok connect bigquery://project-id/dataset-name
+
+# Snowflake
+pip install scherlok[snowflake]
+export SNOWFLAKE_USER=...
+export SNOWFLAKE_PASSWORD=...
+export SNOWFLAKE_WAREHOUSE=...
+scherlok connect snowflake://account/database/schema
 ```
 
 | Database | Status |
 |----------|--------|
 | PostgreSQL | Available |
 | BigQuery | Available |
-| Snowflake | Coming soon |
+| Snowflake | Available |
 | MySQL | Coming soon |
 | DuckDB | Planned |
 
