@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/rbmuller/scherlok/discussions
+    about: Ask questions, share use cases, or discuss the project.
