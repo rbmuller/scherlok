@@ -1,4 +1,4 @@
-name: Release to PyPI
+name: Release
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # trusted publishing
+      id-token: write  # trusted publishing to PyPI
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,3 +33,37 @@ jobs:
       - run: pip install build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release-notes:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for changelog parsing
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+
+          # Extract section for this version from CHANGELOG.md
+          NOTES=$(awk -v ver="## [${VERSION}]" '
+            $0 ~ ver,/^## \[/ {
+              if ($0 ~ ver) { print; next }
+              if ($0 ~ /^## \[/ && $0 !~ ver) exit
+              print
+            }
+          ' CHANGELOG.md)
+
+          if [ -z "$NOTES" ]; then
+            NOTES="See [CHANGELOG.md](CHANGELOG.md) for details."
+          fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "$NOTES" \
+            --verify-tag
