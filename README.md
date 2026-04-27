@@ -117,18 +117,30 @@ Auto-detects Slack, Discord, and Teams from the URL and formats the payload acco
 
 ## CI/CD Integration
 
-Use Scherlok as a data quality gate:
+Use Scherlok as a data quality gate. The `ci` command does it in one line:
 
 ```yaml
 # GitHub Actions
 - name: Data quality check
   run: |
     pip install scherlok
-    scherlok connect ${{ secrets.DATABASE_URL }}
-    scherlok watch --exit-code --fail-on critical
+    scherlok config --store s3://my-bucket/scherlok/profiles.db
+    scherlok ci ${{ secrets.DATABASE_URL }} \
+      --webhook ${{ secrets.SLACK_WEBHOOK }} \
+      --fail-on critical
 ```
 
 If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
+
+## Email alerts
+
+```bash
+export SCHERLOK_SMTP_HOST=smtp.gmail.com
+export SCHERLOK_SMTP_USER=alerts@company.com
+export SCHERLOK_SMTP_PASSWORD=app-specific-password
+
+scherlok watch --email team@company.com --email cto@company.com
+```
 
 ## Connectors
 
@@ -187,7 +199,8 @@ scherlok config --store az://my-container/scherlok/profiles.db
 ```
 scherlok connect <url>          Connect to a database
 scherlok investigate            Profile all tables (learn patterns)
-scherlok watch [-w <url>]       Detect anomalies and alert
+scherlok watch [-w <url>] [-e <email>]  Detect anomalies and alert
+scherlok ci <url> [opts]        All-in-one CI/CD command (connect + watch + exit code)
 scherlok status                 Quick health dashboard
 scherlok report                 Detailed profile summary
 scherlok history [--days N]     Timeline of past anomalies

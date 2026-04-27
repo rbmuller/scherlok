@@ -7,6 +7,7 @@ from rich.table import Table
 
 from scherlok import __version__
 from scherlok.alerter.console import print_anomalies, print_profile_summary
+from scherlok.alerter.email import send_email_alert
 from scherlok.alerter.exitcode import exit_code_for
 from scherlok.alerter.webhook import send_webhook
 from scherlok.config import ScherlokConfig
@@ -140,19 +141,13 @@ def investigate() -> None:
         )
 
 
-@app.command()
-def watch(
-    webhook: str = typer.Option(
-        None, "--webhook", "-w",
-        help="Webhook URL to send alerts (auto-detects Slack, Discord, Teams).",
-    ),
-) -> None:
-    """Compare current state vs stored profile. Detect anomalies.
+def _run_watch(
+    webhook: str | None = None,
+    emails: list[str] | None = None,
+) -> list[dict]:
+    """Run the watch logic: profile + detect + alert. Returns all anomalies.
 
-    Example:
-        scherlok watch
-        scherlok watch --webhook https://hooks.slack.com/...
-        scherlok watch -w https://discord.com/api/webhooks/...
+    Reused by `watch` and `ci` commands.
     """
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
@@ -166,7 +161,6 @@ def watch(
         console.print(f"Watching [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
-            # Volume detection
             current_vol = profile_volume(connector, table)
             stored_vol = store.get_latest_profile(table, "volume")
             if stored_vol:
@@ -174,7 +168,6 @@ def watch(
                     detect_volume_anomalies(table, current_vol, stored_vol)
                 )
 
-            # Schema drift detection
             current_sch = profile_schema(connector, table)
             stored_sch = store.get_latest_profile(table, "schema")
             if stored_sch:
@@ -182,7 +175,6 @@ def watch(
                     detect_schema_drift(table, current_sch, stored_sch)
                 )
 
-            # Freshness detection
             current_fresh = profile_freshness(connector, table)
             stored_fresh = store.get_latest_profile(table, "freshness")
             if stored_fresh:
@@ -190,7 +182,6 @@ def watch(
                     detect_freshness_anomalies(table, current_fresh, stored_fresh)
                 )
 
-            # Per-column detection: nullability, distribution shift, cardinality
             for col in (current_sch or {}).get("columns", []):
                 col_name = col["name"]
                 current_dist = profile_distribution(connector, table, col_name)
@@ -224,14 +215,93 @@ def watch(
             print_anomalies(all_anomalies)
             if webhook:
                 ok = send_webhook(webhook, all_anomalies)
-                if ok:
-                    console.print("[dim]Webhook sent.[/dim]")
-                else:
-                    console.print("[red]Webhook delivery failed.[/red]")
+                console.print(
+                    "[dim]Webhook sent.[/dim]" if ok else "[red]Webhook delivery failed.[/red]"
+                )
+            if emails:
+                ok = send_email_alert(emails, all_anomalies)
+                console.print(
+                    "[dim]Email sent.[/dim]" if ok else "[red]Email delivery failed.[/red]"
+                )
         else:
             console.print("[green]No anomalies detected.[/green]")
 
-    raise typer.Exit(code=exit_code_for(all_anomalies))
+    return all_anomalies
+
+
+@app.command()
+def watch(
+    webhook: str = typer.Option(
+        None, "--webhook", "-w",
+        help="Webhook URL to send alerts (auto-detects Slack, Discord, Teams).",
+    ),
+    email: list[str] = typer.Option(
+        None, "--email", "-e",
+        help="Email recipient(s) for alerts. Repeat to send to multiple.",
+    ),
+) -> None:
+    """Compare current state vs stored profile. Detect anomalies.
+
+    Example:
+        scherlok watch
+        scherlok watch --webhook https://hooks.slack.com/...
+        scherlok watch --email alice@company.com --email bob@company.com
+    """
+    anomalies = _run_watch(webhook=webhook, emails=email or None)
+    raise typer.Exit(code=exit_code_for(anomalies))
+
+
+@app.command()
+def ci(
+    connection_string: str = typer.Argument(
+        ..., help="Database connection string"
+    ),
+    webhook: str = typer.Option(
+        None, "--webhook", "-w", help="Webhook URL for alerts"
+    ),
+    email: list[str] = typer.Option(
+        None, "--email", "-e", help="Email recipient(s) for alerts"
+    ),
+    fail_on: str = typer.Option(
+        "critical", "--fail-on",
+        help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
+    ),
+) -> None:
+    """All-in-one CI/CD command: connect + investigate + watch + exit code.
+
+    Designed for use in pipelines. Profiles tables on first run (no anomalies),
+    then detects on subsequent runs against stored baseline (use remote storage).
+
+    Example:
+        # GitHub Actions
+        - run: |
+            pip install scherlok
+            scherlok config --store s3://my-bucket/scherlok/profiles.db
+            scherlok ci $DATABASE_URL --webhook $SLACK_URL --fail-on critical
+    """
+    # Save connection
+    cfg = ScherlokConfig.load()
+    cfg.connection_string = connection_string
+    cfg.save()
+
+    # Validate connection
+    connector = get_connector(connection_string)
+    if not connector.connect():
+        console.print("[red]Failed to connect.[/red]")
+        raise typer.Exit(code=1)
+
+    # Run watch (does profile + detect + alert in one)
+    anomalies = _run_watch(webhook=webhook, emails=email or None)
+
+    # Custom exit code based on --fail-on
+    fail_on_lower = fail_on.lower()
+    if fail_on_lower == "warning":
+        from scherlok.detector.severity import Severity
+        if any(a["severity"] in (Severity.WARNING, Severity.CRITICAL) for a in anomalies):
+            raise typer.Exit(code=1)
+    else:  # critical (default)
+        if exit_code_for(anomalies) == 1:
+            raise typer.Exit(code=1)
 
 
 @app.command()
