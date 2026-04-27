@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Snowflake connector (`pip install scherlok[snowflake]`)
+- `scherlok ci` command — all-in-one CI/CD (connect + watch + exit code) in one line
+- Email alerter — `scherlok watch --email user@company.com` (configure via `SCHERLOK_SMTP_*` env vars)
+- Multi-recipient support: `--email` is repeatable
 - Issue templates (bug, feature, new connector)
 - CHANGELOG.md
 - Automatic GitHub Release notes on tag push
