@@ -15,6 +15,12 @@ try:
 except ImportError:
     pass  # google-cloud-bigquery not installed
 
+try:
+    from scherlok.connectors.snowflake import SnowflakeConnector
+    CONNECTOR_SCHEMES["snowflake"] = SnowflakeConnector
+except ImportError:
+    pass  # snowflake-connector-python not installed
+
 
 def get_connector(connection_string: str) -> BaseConnector:
     """Return the appropriate connector for a given connection string.
