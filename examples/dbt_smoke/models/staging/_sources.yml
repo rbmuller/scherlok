@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: demo
+    schema: public
+    tables:
+      - name: users
+      - name: orders
+      - name: products

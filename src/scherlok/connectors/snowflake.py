@@ -84,11 +84,11 @@ class SnowflakeConnector(BaseConnector):
         return rows
 
     def list_tables(self) -> list[str]:
-        """List all tables in the schema (excludes views)."""
+        """List all tables and views in the schema."""
         sql = (
             f"SELECT table_name FROM {self._database}.information_schema.tables "
             f"WHERE table_schema = '{self._schema.upper()}' "
-            f"AND table_type = 'BASE TABLE' "
+            f"AND table_type IN ('BASE TABLE', 'VIEW') "
             f"ORDER BY table_name"
         )
         rows = self._query(sql)

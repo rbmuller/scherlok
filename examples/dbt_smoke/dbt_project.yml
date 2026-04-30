@@ -1,0 +1,13 @@
+name: smoke
+version: '1.0.0'
+profile: smoke
+config-version: 2
+
+model-paths: ["models"]
+target-path: "target"
+
+models:
+  smoke:
+    +materialized: table
+    staging:
+      +materialized: view
