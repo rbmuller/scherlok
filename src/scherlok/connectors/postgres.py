@@ -22,8 +22,39 @@ class PostgresConnector(BaseConnector):
             self._conn = psycopg2.connect(self.connection_string)
             self._conn.autocommit = True
             return True
-        except psycopg2.Error:
+        except psycopg2.Error as exc:
+            self._last_error = self._classify_error(str(exc))
             return False
+
+    @staticmethod
+    def _classify_error(message: str) -> str:
+        """Map psycopg2 error text to a short, actionable hint."""
+        msg = message.strip()
+        lowered = msg.lower()
+        if "could not connect to server" in lowered or "connection refused" in lowered:
+            return (
+                "connection refused — is the server reachable?\n"
+                "  Hint: docker compose ps  /  pg_isready -h <host> -p <port>"
+            )
+        if "password authentication failed" in lowered or "authentication failed" in lowered:
+            return "wrong username or password — check the credentials in your connection string"
+        if "does not exist" in lowered and "database" in lowered:
+            return (
+                "database does not exist on the server\n"
+                "  Hint: list databases with `psql -l -h <host> -p <port>`"
+            )
+        if "ssl" in lowered and "required" in lowered:
+            return (
+                "server requires SSL\n"
+                "  Hint: append `?sslmode=require` to the connection string"
+            )
+        if "timeout" in lowered:
+            return "connection timed out — check the host/port and any firewall in front"
+        if "no such host" in lowered or "name or service not known" in lowered:
+            return "host not found — check the hostname in your connection string"
+        # Fallback: the raw message, trimmed and de-newlined for readability
+        first_line = msg.splitlines()[0] if msg else "unknown error"
+        return f"{first_line}"
 
     def _cursor(self) -> Any:
         """Return a dict cursor."""

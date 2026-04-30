@@ -9,10 +9,20 @@ class BaseConnector(ABC):
 
     def __init__(self, connection_string: str) -> None:
         self.connection_string = connection_string
+        self._last_error: str | None = None
+
+    @property
+    def last_error(self) -> str | None:
+        """Friendly, actionable description of the most recent failure, or None."""
+        return self._last_error
 
     @abstractmethod
     def connect(self) -> bool:
-        """Validate and establish a connection. Return True on success."""
+        """Validate and establish a connection. Return True on success.
+
+        On failure, implementations should set ``self._last_error`` to a
+        short, actionable string (no traceback) before returning False.
+        """
         ...
 
     @abstractmethod
