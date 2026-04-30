@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>scherlok — {{ meta.project_name }} report</title>
+<style>{{ css | safe }}</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      {% if logo_data_uri %}<img class="logo" src="{{ logo_data_uri }}" alt="scherlok">{% endif %}
+      <div>
+        <h1>scherlok</h1>
+        <div class="sub">Data quality report · v{{ meta.version }}</div>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="project">{{ meta.project_name }}</div>
+      <div>{{ meta.connection }}</div>
+      <div>Generated {{ meta.generated_at }}</div>
+      {% if meta.last_watch_human != "—" %}
+      <div>Last <code class="mono">scherlok watch</code>: {{ meta.last_watch_human }} · Baseline window: {{ meta.baseline_window_days }} days</div>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="label">Tables monitored</div>
+      <div class="value">{{ kpis.tables_monitored }}</div>
+      <div class="delta">{{ kpis.coverage_label }}</div>
+    </div>
+    <div class="kpi {% if kpis.critical %}bad{% endif %}">
+      <div class="label">Critical incidents</div>
+      <div class="value">{{ kpis.critical }}</div>
+      <div class="delta">latest watch run</div>
+    </div>
+    <div class="kpi {% if kpis.warnings %}warn{% endif %}">
+      <div class="label">Warnings</div>
+      <div class="value">{{ kpis.warnings }}</div>
+      <div class="delta">latest watch run</div>
+    </div>
+    <div class="kpi">
+      <div class="label">History window</div>
+      <div class="value">{{ kpis.history_days }}d</div>
+      <div class="delta">past anomalies</div>
+    </div>
+  </div>
+
+  {% if dbt_context %}
+  <section>
+    <h2>dbt context</h2>
+    <div class="dbt-card">
+      <div class="left">
+        <div class="icon">d</div>
+        <div>
+          <div style="font-weight:500">{{ dbt_context.project_name }} · target/manifest.json</div>
+          <div class="muted" style="font-size:12px">
+            {{ dbt_context.adapter }} adapter · {{ dbt_context.models_count }} materialized models
+          </div>
+        </div>
+      </div>
+      <div class="stats">
+        <div>Models: <b>{{ dbt_context.models_count }}</b></div>
+        <div>Sources: <b>{{ dbt_context.sources_count }}</b></div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section>
+    {% if incidents %}
+    <h2>Active incidents · {{ incidents | length }} incident{{ 's' if incidents | length != 1 else '' }} · {{ symptom_count }} symptom{{ 's' if symptom_count != 1 else '' }} · grouped by table</h2>
+    {% for incident in incidents %}
+    <div class="incident {{ incident.severity | lower }}">
+      <div class="incident-header">
+        <span class="badge {{ incident.severity | lower }}">{{ incident.severity }}</span>
+        <span class="table">{{ incident.table }}</span>
+        <span class="summary">{{ incident.summary }}</span>
+        <span class="first-seen">
+          {% if incident.first_seen %}
+          first seen {{ incident.first_seen | humanize_iso }}
+          {% if incident.last_seen and incident.last_seen != incident.first_seen %}
+            · last {{ incident.last_seen | humanize_iso }}
+          {% endif %}
+          ·
+          {% endif %}
+          {{ incident.symptoms | length }} symptom{{ 's' if incident.symptoms | length != 1 else '' }}
+        </span>
+      </div>
+      {% for symptom in incident.symptoms %}
+      <div class="symptom">
+        <div class="what">{{ symptom.message }}</div>
+        <div class="threshold mono">
+          {{ symptom.severity }} · {{ symptom.type }}
+          {% if symptom.detected_at %} · {{ symptom.detected_at | humanize_iso }}{% endif %}
+        </div>
+        {% if symptom.schema_diff %}
+        <div class="schema-diff">
+          {% for entry in symptom.schema_diff %}
+            {% if entry.kind == "added" %}
+            <div class="add"><span class="marker">+</span><span class="col">{{ entry.column }}</span>{{ entry.new_type }}</div>
+            {% elif entry.kind == "removed" %}
+            <div class="remove"><span class="marker">−</span><span class="col">{{ entry.column }}</span></div>
+            {% else %}
+            <div class="change"><span class="marker">~</span><span class="col">{{ entry.column }}</span><span class="muted">{{ entry.old_type }}</span> → {{ entry.new_type }}</div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <h2>Active incidents</h2>
+    <div class="empty">
+      <div class="empty-icon">✓</div>
+      <div class="empty-title">No active incidents</div>
+      <div class="empty-sub">Last <code class="mono">scherlok watch</code>: {{ meta.last_watch_human }}</div>
+    </div>
+    {% endif %}
+  </section>
+
+  {% if tables %}
+  <section>
+    <h2>Table health</h2>
+    <div class="grid">
+      <table>
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Status</th>
+            <th class="num">Rows</th>
+            <th>Trend ({{ kpis.history_days }}d)</th>
+            <th>Cols</th>
+            <th>Last profiled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tables %}
+          <tr>
+            <td class="name">{{ t.name }}</td>
+            <td>
+              <span class="health">
+                <span class="dot {{ {'critical': 'red', 'warning': 'yellow'}.get(t.status, 'green') }}"></span>
+                {{ t.status | capitalize }}
+              </span>
+            </td>
+            <td class="num">{{ "{:,}".format(t.rows) }}</td>
+            <td>
+              <svg class="spark" width="100" height="20" viewBox="0 0 100 20">
+                <path class="{{ 'stroke-bad' if t.status != 'healthy' else 'stroke-ok' }}" d="{{ t.sparkline_path }}"/>
+              </svg>
+            </td>
+            <td class="num muted">{{ t.cols }}</td>
+            <td class="muted">{{ t.last_profiled }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if history %}
+  <section>
+    <h2>Recent anomaly history ({{ kpis.history_days }} days)</h2>
+    <div class="grid">
+      <table>
+        <thead>
+          <tr>
+            <th>Detected at</th>
+            <th>Severity</th>
+            <th>Table</th>
+            <th>Type</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr>
+            <td class="muted">{{ h.detected_at[:19] | replace('T', ' ') }}</td>
+            <td><span class="badge {{ h.severity | lower }}">{{ h.severity }}</span></td>
+            <td class="name">{{ h.table }}</td>
+            <td class="mono">{{ h.type }}</td>
+            <td>{{ h.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <footer>
+    Generated by <a href="https://github.com/rbmuller/scherlok">scherlok v{{ meta.version }}</a> ·
+    <code class="mono">scherlok dashboard</code>
+  </footer>
+
+</div>
+</body>
+</html>

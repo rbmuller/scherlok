@@ -1,5 +1,6 @@
 """CLI entry point for Scherlok. Built with Typer and Rich."""
 
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -501,6 +502,79 @@ def _print_dbt_model_result(
     color = "red" if worst == "CRITICAL" else "yellow"
     msg = anomalies[0].get("message", "anomaly detected")
     console.print(f"  [{color}]✗[/{color}] {name:<30} {worst}: {msg}")
+
+
+@app.command()
+def dashboard(
+    out: str = typer.Option(
+        "scherlok-report.html", "--out", "-o",
+        help="Output path for the generated HTML report.",
+    ),
+    days: int = typer.Option(
+        14, "--days", "-d",
+        help="Anomaly history window (in days).",
+    ),
+    theme: str = typer.Option(
+        "auto", "--theme",
+        help="Theme: auto (follows OS), dark, or light.",
+    ),
+    project_name: str = typer.Option(
+        None, "--project-name",
+        help="Display name in the report header (default: derived from connection).",
+    ),
+) -> None:
+    """Generate a self-contained HTML dashboard report from the local profile store.
+
+    Reads ~/.scherlok/profiles.db (or the configured remote store) and writes
+    a single HTML file you can open in a browser, share via Slack, or screenshot.
+
+    Example:
+        scherlok dashboard --out report.html
+        scherlok dashboard --theme light --days 30
+    """
+    from scherlok.dashboard import render_dashboard
+
+    cfg = ScherlokConfig.load()
+    conn_str = cfg.get_connection_string() or ""
+    display_name = project_name or _project_name_from_connection(conn_str)
+
+    from scherlok.config import PROFILES_DB
+    with sync_context(cfg.get_store(), PROFILES_DB):
+        store = ProfileStore()
+        try:
+            html = render_dashboard(
+                store,
+                days=days,
+                theme=theme,
+                project_name=display_name,
+                connection_string=conn_str,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        finally:
+            store.close()
+
+    out_path = Path(out)
+    out_path.write_text(html, encoding="utf-8")
+    size_kb = len(html.encode("utf-8")) / 1024
+    console.print(
+        f"[green]Dashboard written to[/green] [bold]{out_path}[/bold] "
+        f"([dim]{size_kb:.0f} KB[/dim])"
+    )
+
+
+def _project_name_from_connection(conn: str) -> str:
+    """Derive a friendly project name from a connection URL, fallback to 'scherlok'."""
+    if not conn:
+        return "scherlok"
+    if "://" in conn:
+        rest = conn.split("://", 1)[1]
+        # Last path segment, strip query
+        last = rest.rstrip("/").split("/")[-1].split("?")[0]
+        if last:
+            return last
+    return "scherlok"
 
 
 @app.command()
