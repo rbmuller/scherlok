@@ -1,0 +1,19 @@
+jaffle_shop:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: "{{ env_var('PG_USER', 'jaffle') }}"
+      password: "{{ env_var('PG_PASSWORD', 'secret') }}"
+      dbname: jaffle_db
+      schema: public
+    prod:
+      type: postgres
+      host: prod-host
+      port: 5432
+      user: prod_user
+      password: prod_pw
+      dbname: jaffle_prod
+      schema: public

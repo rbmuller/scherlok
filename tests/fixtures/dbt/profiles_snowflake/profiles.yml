@@ -1,0 +1,12 @@
+jaffle_shop:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: my-account.us-east-1
+      user: "{{ env_var('SF_USER') }}"
+      password: "{{ env_var('SF_PASSWORD') }}"
+      database: ANALYTICS
+      schema: PUBLIC
+      warehouse: COMPUTE_WH
+      role: TRANSFORMER

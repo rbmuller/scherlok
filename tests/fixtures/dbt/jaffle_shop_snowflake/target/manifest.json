@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+    "dbt_version": "1.8.0",
+    "adapter_type": "snowflake",
+    "project_name": "jaffle_shop"
+  },
+  "nodes": {
+    "model.jaffle_shop.STG_ORDERS": {
+      "resource_type": "model",
+      "name": "stg_orders",
+      "alias": "STG_ORDERS",
+      "database": "ANALYTICS",
+      "schema": "PUBLIC",
+      "fqn": ["jaffle_shop", "staging", "stg_orders"],
+      "relation_name": "ANALYTICS.PUBLIC.STG_ORDERS",
+      "config": {"materialized": "table"}
+    }
+  },
+  "sources": {}
+}
