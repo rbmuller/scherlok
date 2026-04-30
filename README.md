@@ -99,11 +99,13 @@ Use it as a CI gate after `dbt run`:
 
 ## HTML dashboard
 
+![scherlok dashboard](assets/dashboard-screenshot.png)
+
 ```bash
 scherlok dashboard --out report.html
 ```
 
-One self-contained HTML file (~28 KB): KPIs, per-table incidents grouped with first-seen timestamps, `+`/`−`/`~` schema-drift diff, sparklines, and full anomaly history. Auto dark/light theme via `prefers-color-scheme`. No external URLs — works offline, screenshot-friendly.
+One self-contained HTML file (~28 KB): KPIs, per-table incidents grouped with first-seen timestamps, `+`/`−`/`~` schema-drift diff, sparklines, and full anomaly history. Auto dark/light theme via `prefers-color-scheme`.
 
 📖 Full docs: [dashboard guide →](src/scherlok/dashboard/README.md)
 
