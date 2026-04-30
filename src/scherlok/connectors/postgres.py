@@ -30,11 +30,12 @@ class PostgresConnector(BaseConnector):
         return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     def list_tables(self) -> list[str]:
-        """List all user tables in the public schema."""
+        """List all user tables and views in the public schema."""
         with self._cursor() as cur:
             cur.execute(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
+                "WHERE table_schema = 'public' "
+                "AND table_type IN ('BASE TABLE', 'VIEW') "
                 "ORDER BY table_name"
             )
             return [row["table_name"] for row in cur.fetchall()]

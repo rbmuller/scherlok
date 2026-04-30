@@ -43,6 +43,24 @@ class TestSnowflakeConnector:
         tables = c.list_tables()
         # Result is lowercased
         assert tables == ["users", "orders"]
+        # Regression for #7: query must include both BASE TABLE and VIEW
+        sql = mock_query.call_args.args[0]
+        assert "'BASE TABLE'" in sql and "'VIEW'" in sql
+
+    @patch("scherlok.connectors.snowflake.SnowflakeConnector._query")
+    def test_list_tables_includes_views(self, mock_query):
+        """Issue #7: views (e.g. dbt staging models) must be discoverable."""
+        from scherlok.connectors.snowflake import SnowflakeConnector
+
+        mock_query.return_value = [
+            {"table_name": "FCT_ORDERS"},  # table
+            {"table_name": "STG_USERS"},  # view
+        ]
+        c = SnowflakeConnector("snowflake://acc/db/schema")
+        c._conn = MagicMock()
+        tables = c.list_tables()
+        assert "stg_users" in tables
+        assert "fct_orders" in tables
 
     @patch("scherlok.connectors.snowflake.SnowflakeConnector._query")
     def test_get_columns(self, mock_query):

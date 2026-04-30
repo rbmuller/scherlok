@@ -1,0 +1,12 @@
+smoke:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5433
+      user: scherlok
+      password: scherlok
+      dbname: demo
+      schema: public
+      threads: 1
