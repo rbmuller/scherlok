@@ -1,6 +1,8 @@
 # Dashboard
 
-The `scherlok dashboard` command turns the local profile store into a single-file HTML report. Designed for screenshots, blog posts, Slack shares, and Show HN.
+The `scherlok dashboard` command turns the local profile store into a single-file HTML report.
+
+![scherlok dashboard](../../../assets/dashboard-screenshot.png)
 
 ## Quick start
 
@@ -8,7 +10,7 @@ The `scherlok dashboard` command turns the local profile store into a single-fil
 scherlok dashboard --out report.html
 ```
 
-That's it. The file is self-contained (~28 KB): no external CSS, no fonts to download, logo embedded as base64. Open it in any browser; share it as an artifact in Slack or attach to a PR.
+The output is a self-contained HTML file (~28 KB): no external CSS, no fonts to download, logo embedded as base64. Open it in any browser.
 
 ## Options
 
@@ -58,32 +60,17 @@ ProfileStore
                                 report.html
 ```
 
-## What's deliberately out of scope (v0.5.0)
+## Out of scope
 
-This dashboard is **basic-tier OSS**. Anything that needs state, identity, real-time, or cross-tenant aggregation lives on the Cloud-tier roadmap:
+The dashboard is intentionally read-only. Anything that requires state, identity, real-time updates, or cross-tenant aggregation is out of scope:
 
-- ❌ Acknowledge / suppress / resolve workflow
-- ❌ Multi-project / multi-DB single pane of glass
-- ❌ Scheduled hosted runs (no infra to manage)
-- ❌ ML-based seasonality detection
-- ❌ Lineage from query logs (BQ INFORMATION_SCHEMA.JOBS, Snowflake QUERY_HISTORY)
-- ❌ SSO / RBAC / audit log
-- ❌ Bidirectional Slack ack flow
-
-The design analogue is `dbt run` writing `target/run_results.json` — a polished read-only artifact, not a Cloud canibalization.
-
-## Roadmap-deferred dashboard items
-
-Captured in [`docs/specs/2026-04-30-dashboard.md`](../../../docs/specs/2026-04-30-dashboard.md):
-
-- Anomaly timeline barchart (last N days)
-- Stale tables panel (already detected via freshness; UI add-on)
-- Per-incident CTA snippets (`scherlok watch --select X`)
-- Lineage / blast radius (Mês 5)
-- MTTD / MTTR (needs more historical data)
-- Cost / bytes scanned (needs connector instrumentation)
-- PII column flagging (Mês 6+)
-- Branch / commit metadata (CI integration via GitHub Action)
+- Acknowledge / suppress / resolve workflow
+- Multi-project / multi-DB single pane of glass
+- Scheduled hosted runs
+- ML-based seasonality detection
+- Lineage from query logs
+- SSO / RBAC / audit log
+- Bidirectional Slack ack flow
 
 ## Contract with the detectors
 
