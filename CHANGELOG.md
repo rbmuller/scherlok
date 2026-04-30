@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **HTML dashboard** — new `scherlok dashboard` command. Generates a self-contained HTML report (~28 KB) from the local profile store: KPIs, per-table incidents grouped with summary/threshold/first-seen, schema-drift `+`/`-`/`~` diff, sparklines, and history. Auto dark/light theme via `prefers-color-scheme` (`--theme dark|light` to override). No external URLs in the rendered file — works offline, screenshot-friendly.
+  - Adds `jinja2>=3.0` to core dependencies
+  - New module: [`src/scherlok/dashboard/`](src/scherlok/dashboard/) (assembler, grouping, schema parser, template, render, CLI)
+  - Spec: [`docs/specs/2026-04-30-dashboard.md`](docs/specs/2026-04-30-dashboard.md)
+
 ### Fixed
 - **Views were silently skipped** by `scherlok investigate`/`watch`/`dbt` on Postgres and Snowflake (`list_tables` filtered to `BASE TABLE` only). Materialized dbt views (`materialized: view`, the default for `staging/` models in layered dbt projects) are now discovered. ([#7](https://github.com/rbmuller/scherlok/issues/7))
 

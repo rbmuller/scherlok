@@ -97,6 +97,16 @@ Use it as a CI gate after `dbt run`:
 
 📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
 
+## HTML dashboard
+
+```bash
+scherlok dashboard --out report.html
+```
+
+One self-contained HTML file (~28 KB): KPIs, per-table incidents grouped with first-seen timestamps, `+`/`−`/`~` schema-drift diff, sparklines, and full anomaly history. Auto dark/light theme via `prefers-color-scheme`. No external URLs — works offline, screenshot-friendly.
+
+📖 Full docs: [dashboard guide →](src/scherlok/dashboard/README.md)
+
 ## How It Works
 
 ### 1. `investigate` — Learn the patterns
