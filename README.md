@@ -95,6 +95,8 @@ Use it as a CI gate after `dbt run`:
 
 **Supported adapters:** `postgres`, `bigquery`, `snowflake`. For others, pass `--connection-string` explicitly.
 
+📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
+
 ## How It Works
 
 ### 1. `investigate` — Learn the patterns
