@@ -63,6 +63,38 @@ Three commands. Five minutes. Done.
 
 Every anomaly is auto-scored: **INFO**, **WARNING**, or **CRITICAL**. No thresholds to configure.
 
+## Works with dbt
+
+Already running dbt? Scherlok complements `dbt test` with **automatic** anomaly detection — no rules to write.
+
+```bash
+pip install scherlok[dbt]
+
+# After `dbt run`, point Scherlok at your project
+scherlok dbt --project-dir ./my_dbt_project
+```
+
+Scherlok reads `target/manifest.json`, discovers every materialized model (`table`, `incremental`, `view`), auto-resolves the connection from your `profiles.yml`, and profiles each model:
+
+```
+Investigating 4 dbt models in ./my_dbt_project (postgres)
+  ✓ stg_customers                  (12,345 rows)
+  ✓ stg_orders                     (98,765 rows)
+  ✗ fct_orders                     CRITICAL: Row count dropped 42% (98,765 → 57,283)
+  ✓ dim_customers_inc              (12,300 rows)
+
+Summary: 4 profiled, 1 anomalies (1 critical, 0 warning)
+```
+
+Use it as a CI gate after `dbt run`:
+
+```yaml
+- run: dbt run --target prod
+- run: scherlok dbt --project-dir . --target prod --fail-on critical
+```
+
+**Supported adapters:** `postgres`, `bigquery`, `snowflake`. For others, pass `--connection-string` explicitly.
+
 ## How It Works
 
 ### 1. `investigate` — Learn the patterns

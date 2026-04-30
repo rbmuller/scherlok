@@ -141,90 +141,108 @@ def investigate() -> None:
         )
 
 
+def _watch_table(connector: object, store: ProfileStore, table: str) -> tuple[list[dict], dict]:
+    """Profile one table + detect anomalies against stored baseline. Saves new profiles.
+
+    Returns (anomalies, current_volume) — `current_volume` is handy for callers
+    that want to display row counts inline (e.g. dbt-style ✓/✗ output).
+    """
+    anomalies: list[dict] = []
+
+    current_vol = profile_volume(connector, table)
+    stored_vol = store.get_latest_profile(table, "volume")
+    if stored_vol:
+        anomalies.extend(detect_volume_anomalies(table, current_vol, stored_vol))
+
+    current_sch = profile_schema(connector, table)
+    stored_sch = store.get_latest_profile(table, "schema")
+    if stored_sch:
+        anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
+
+    current_fresh = profile_freshness(connector, table)
+    stored_fresh = store.get_latest_profile(table, "freshness")
+    if stored_fresh:
+        anomalies.extend(
+            detect_freshness_anomalies(table, current_fresh, stored_fresh)
+        )
+
+    for col in (current_sch or {}).get("columns", []):
+        col_name = col["name"]
+        current_dist = profile_distribution(connector, table, col_name)
+        stored_dist = store.get_latest_profile(table, f"distribution:{col_name}")
+        if stored_dist:
+            anomalies.extend(
+                detect_nullability_anomalies(table, col_name, current_dist, stored_dist)
+            )
+            anomalies.extend(
+                detect_distribution_shift(table, col_name, current_dist, stored_dist)
+            )
+            anomalies.extend(
+                detect_cardinality_anomalies(table, col_name, current_dist, stored_dist)
+            )
+        store.save_profile(table, f"distribution:{col_name}", current_dist)
+
+    store.save_profile(table, "volume", current_vol)
+    store.save_profile(table, "schema", current_sch)
+    store.save_profile(table, "freshness", current_fresh)
+
+    return anomalies, current_vol
+
+
+def _dispatch_alerts(
+    anomalies: list[dict],
+    store: ProfileStore,
+    webhook: str | None,
+    emails: list[str] | None,
+) -> None:
+    """Persist anomalies and fan out to webhook/email alerters."""
+    if not anomalies:
+        console.print("[green]No anomalies detected.[/green]")
+        return
+    store.save_anomalies(anomalies)
+    print_anomalies(anomalies)
+    if webhook:
+        ok = send_webhook(webhook, anomalies)
+        console.print(
+            "[dim]Webhook sent.[/dim]" if ok else "[red]Webhook delivery failed.[/red]"
+        )
+    if emails:
+        ok = send_email_alert(emails, anomalies)
+        console.print(
+            "[dim]Email sent.[/dim]" if ok else "[red]Email delivery failed.[/red]"
+        )
+
+
 def _run_watch(
     webhook: str | None = None,
     emails: list[str] | None = None,
+    tables: list[str] | None = None,
+    connector: object | None = None,
 ) -> list[dict]:
     """Run the watch logic: profile + detect + alert. Returns all anomalies.
 
-    Reused by `watch` and `ci` commands.
+    Reused by `watch`, `ci`, and `dbt` commands. When `tables` is None, all
+    tables visible to the connector are used. When `connector` is None, one
+    is loaded from the saved config.
     """
-    connector = _get_connector_or_exit()
+    if connector is None:
+        connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = ProfileStore()
-        tables = connector.list_tables()
+        if tables is None:
+            tables = connector.list_tables()
         all_anomalies: list[dict] = []
 
         console.print(f"Watching [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
-            current_vol = profile_volume(connector, table)
-            stored_vol = store.get_latest_profile(table, "volume")
-            if stored_vol:
-                all_anomalies.extend(
-                    detect_volume_anomalies(table, current_vol, stored_vol)
-                )
+            anomalies, _ = _watch_table(connector, store, table)
+            all_anomalies.extend(anomalies)
 
-            current_sch = profile_schema(connector, table)
-            stored_sch = store.get_latest_profile(table, "schema")
-            if stored_sch:
-                all_anomalies.extend(
-                    detect_schema_drift(table, current_sch, stored_sch)
-                )
-
-            current_fresh = profile_freshness(connector, table)
-            stored_fresh = store.get_latest_profile(table, "freshness")
-            if stored_fresh:
-                all_anomalies.extend(
-                    detect_freshness_anomalies(table, current_fresh, stored_fresh)
-                )
-
-            for col in (current_sch or {}).get("columns", []):
-                col_name = col["name"]
-                current_dist = profile_distribution(connector, table, col_name)
-                stored_dist = store.get_latest_profile(
-                    table, f"distribution:{col_name}"
-                )
-                if stored_dist:
-                    all_anomalies.extend(
-                        detect_nullability_anomalies(
-                            table, col_name, current_dist, stored_dist
-                        )
-                    )
-                    all_anomalies.extend(
-                        detect_distribution_shift(
-                            table, col_name, current_dist, stored_dist
-                        )
-                    )
-                    all_anomalies.extend(
-                        detect_cardinality_anomalies(
-                            table, col_name, current_dist, stored_dist
-                        )
-                    )
-                store.save_profile(table, f"distribution:{col_name}", current_dist)
-
-            store.save_profile(table, "volume", current_vol)
-            store.save_profile(table, "schema", current_sch)
-            store.save_profile(table, "freshness", current_fresh)
-
-        if all_anomalies:
-            store.save_anomalies(all_anomalies)
-            print_anomalies(all_anomalies)
-            if webhook:
-                ok = send_webhook(webhook, all_anomalies)
-                console.print(
-                    "[dim]Webhook sent.[/dim]" if ok else "[red]Webhook delivery failed.[/red]"
-                )
-            if emails:
-                ok = send_email_alert(emails, all_anomalies)
-                console.print(
-                    "[dim]Email sent.[/dim]" if ok else "[red]Email delivery failed.[/red]"
-                )
-        else:
-            console.print("[green]No anomalies detected.[/green]")
+        _dispatch_alerts(all_anomalies, store, webhook, emails)
 
     return all_anomalies
 
@@ -302,6 +320,187 @@ def ci(
     else:  # critical (default)
         if exit_code_for(anomalies) == 1:
             raise typer.Exit(code=1)
+
+
+@app.command()
+def dbt(
+    project_dir: str = typer.Option(
+        ".", "--project-dir", help="Path to dbt project root (containing dbt_project.yml)"
+    ),
+    profiles_dir: str = typer.Option(
+        None, "--profiles-dir", help="Path to dir containing profiles.yml (default: ~/.dbt)"
+    ),
+    target: str = typer.Option(
+        None, "--target", help="dbt target to use (default: profile's `target:` key)"
+    ),
+    connection_string: str = typer.Option(
+        None, "--connection-string",
+        help="Override profiles.yml resolution and use this connection string directly",
+    ),
+    select: list[str] = typer.Option(
+        None, "--select", "-s",
+        help="Only profile these models (by name). Repeat to select multiple.",
+    ),
+    include_sources: bool = typer.Option(
+        False, "--include-sources", help="Also profile dbt sources, not only models"
+    ),
+    webhook: str = typer.Option(
+        None, "--webhook", "-w", help="Webhook URL for alerts"
+    ),
+    email: list[str] = typer.Option(
+        None, "--email", "-e", help="Email recipient(s) for alerts"
+    ),
+    fail_on: str = typer.Option(
+        "critical", "--fail-on",
+        help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
+    ),
+) -> None:
+    """Profile and watch dbt models. Reads target/manifest.json.
+
+    Run this after `dbt run` to detect anomalies in materialized models.
+    First run profiles a baseline; subsequent runs detect drift.
+
+    Example:
+        scherlok dbt --project-dir ./my_dbt_project
+        scherlok dbt --project-dir . --select stg_orders --select fct_orders
+        scherlok dbt --project-dir . --connection-string postgresql://...
+    """
+    from scherlok.dbt import (
+        DbtNode,
+        ProfileResolutionError,
+        discover_models,
+        discover_sources,
+        load_manifest,
+        resolve_connection_string,
+    )
+
+    # 1. Load manifest
+    try:
+        manifest = load_manifest(project_dir)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    adapter = manifest.get("metadata", {}).get("adapter_type", "?")
+    nodes: list[DbtNode] = discover_models(manifest)
+    if include_sources:
+        nodes.extend(discover_sources(manifest))
+
+    if select:
+        wanted = set(select)
+        nodes = [n for n in nodes if n.name in wanted or n.identifier in wanted]
+        if not nodes:
+            console.print(f"[red]No models matched --select {list(wanted)}.[/red]")
+            raise typer.Exit(code=1)
+
+    if not nodes:
+        console.print("[yellow]No materialized models found in manifest.[/yellow]")
+        raise typer.Exit(code=0)
+
+    # 2. Resolve connection string
+    if connection_string:
+        conn_str = connection_string
+    else:
+        try:
+            conn_str = resolve_connection_string(
+                project_dir, profiles_dir=profiles_dir, target=target
+            )
+        except ProfileResolutionError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+    cfg = ScherlokConfig.load()
+    cfg.connection_string = conn_str
+    cfg.save()
+
+    connector = get_connector(conn_str)
+    if not connector.connect():
+        console.print("[red]Failed to connect using the resolved connection.[/red]")
+        raise typer.Exit(code=1)
+
+    # 3. Match models to physical tables visible to the connector
+    visible = set(connector.list_tables())
+    matched: list[tuple[DbtNode, str]] = []
+    missing: list[DbtNode] = []
+    for node in nodes:
+        physical = _resolve_physical_table(node, visible)
+        if physical is None:
+            missing.append(node)
+        else:
+            matched.append((node, physical))
+
+    console.print(
+        f"Investigating [bold]{len(matched)}[/bold] dbt {'nodes' if include_sources else 'models'} "
+        f"in [cyan]{project_dir}[/cyan] ([dim]{adapter}[/dim])"
+    )
+    if missing:
+        console.print(
+            f"[yellow]Skipped {len(missing)} not found in {adapter}: "
+            f"{', '.join(n.name for n in missing[:5])}"
+            f"{' …' if len(missing) > 5 else ''}[/yellow]"
+        )
+
+    # 4. Per-model investigate + watch
+    from scherlok.config import PROFILES_DB
+    all_anomalies: list[dict] = []
+    with sync_context(cfg.get_store(), PROFILES_DB):
+        store = ProfileStore()
+        for node, physical in matched:
+            table_anomalies, current_vol = _watch_table(connector, store, physical)
+            all_anomalies.extend(table_anomalies)
+            _print_dbt_model_result(node, physical, current_vol, table_anomalies)
+        _dispatch_alerts(all_anomalies, store, webhook, email or None)
+
+    # 5. Summary + exit code
+    crit = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("CRITICAL"))
+    warn = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("WARNING"))
+    console.print(
+        f"\n[bold]Summary:[/bold] {len(matched)} profiled, "
+        f"{len(all_anomalies)} anomalies "
+        f"([red]{crit} critical[/red], [yellow]{warn} warning[/yellow])"
+    )
+
+    fail_on_lower = fail_on.lower()
+    if fail_on_lower == "warning":
+        from scherlok.detector.severity import Severity
+        if any(
+            a["severity"] in (Severity.WARNING, Severity.CRITICAL) for a in all_anomalies
+        ):
+            raise typer.Exit(code=1)
+    else:
+        if exit_code_for(all_anomalies) == 1:
+            raise typer.Exit(code=1)
+
+
+def _resolve_physical_table(node: object, visible: set[str]) -> str | None:
+    """Match a dbt node to a physical table name visible to the connector.
+
+    Tries identifier first, then name; for Snowflake also tries uppercase variants.
+    """
+    candidates = [node.identifier, node.name]  # type: ignore[attr-defined]
+    if node.adapter == "snowflake":  # type: ignore[attr-defined]
+        candidates.extend([c.upper() for c in candidates if c])
+    for cand in candidates:
+        if cand and cand in visible:
+            return cand
+    return None
+
+
+def _print_dbt_model_result(
+    node: object, physical: str, current_vol: dict, anomalies: list[dict]
+) -> None:
+    """Print one ✓/✗ line for a dbt model with row count or anomaly summary."""
+    name = node.name  # type: ignore[attr-defined]
+    if not anomalies:
+        rows = current_vol.get("row_count", "?")
+        console.print(f"  [green]✓[/green] {name:<30} ({rows:,} rows)")
+        return
+    # Show the worst anomaly summary on the line
+    severities = [str(a.get("severity")) for a in anomalies]
+    worst = "CRITICAL" if any("CRITICAL" in s for s in severities) else "WARNING"
+    color = "red" if worst == "CRITICAL" else "yellow"
+    msg = anomalies[0].get("message", "anomaly detected")
+    console.print(f"  [{color}]✗[/{color}] {name:<30} {worst}: {msg}")
 
 
 @app.command()

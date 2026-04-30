@@ -1,0 +1,4 @@
+name: jaffle_shop
+version: '1.0.0'
+profile: jaffle_shop
+config-version: 2

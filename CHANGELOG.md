@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **dbt integration v0** — new `scherlok dbt` command. Reads `target/manifest.json`, discovers materialized models (`table`/`incremental`/`view`/`materialized_view`), auto-resolves the connection from `profiles.yml` (postgres / bigquery / snowflake), and runs investigate + watch per model with dbt-style ✓/✗ output.
+  - Optional dependency: `pip install scherlok[dbt]` (adds PyYAML)
+  - Flags: `--project-dir`, `--profiles-dir`, `--target`, `--connection-string`, `--select`, `--include-sources`, `--fail-on`, `--webhook`, `--email`
+  - Supports `{{ env_var('NAME', 'default') }}` rendering in `profiles.yml`
+  - Requires dbt 1.6+ (manifest schema v10+)
+
 ## [0.4.0] — 2026-04-27
 
 ### Added

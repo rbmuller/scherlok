@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v8.json",
+    "dbt_version": "1.4.0",
+    "adapter_type": "postgres",
+    "project_name": "jaffle_shop"
+  },
+  "nodes": {},
+  "sources": {}
+}

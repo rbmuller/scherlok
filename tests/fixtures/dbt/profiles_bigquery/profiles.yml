@@ -1,0 +1,10 @@
+jaffle_shop:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: my-gcp-project
+      dataset: jaffle_shop
+      threads: 4
+      location: US

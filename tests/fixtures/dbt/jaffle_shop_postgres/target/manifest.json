@@ -1,0 +1,81 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+    "dbt_version": "1.8.0",
+    "generated_at": "2026-04-30T12:00:00.000000Z",
+    "adapter_type": "postgres",
+    "project_name": "jaffle_shop"
+  },
+  "nodes": {
+    "model.jaffle_shop.stg_customers": {
+      "resource_type": "model",
+      "name": "stg_customers",
+      "alias": "stg_customers",
+      "database": "jaffle_db",
+      "schema": "public",
+      "fqn": ["jaffle_shop", "staging", "stg_customers"],
+      "relation_name": "\"jaffle_db\".\"public\".\"stg_customers\"",
+      "config": {"materialized": "view"}
+    },
+    "model.jaffle_shop.stg_orders": {
+      "resource_type": "model",
+      "name": "stg_orders",
+      "alias": "stg_orders",
+      "database": "jaffle_db",
+      "schema": "public",
+      "fqn": ["jaffle_shop", "staging", "stg_orders"],
+      "relation_name": "\"jaffle_db\".\"public\".\"stg_orders\"",
+      "config": {"materialized": "view"}
+    },
+    "model.jaffle_shop.fct_orders": {
+      "resource_type": "model",
+      "name": "fct_orders",
+      "alias": "fct_orders",
+      "database": "jaffle_db",
+      "schema": "public",
+      "fqn": ["jaffle_shop", "marts", "fct_orders"],
+      "relation_name": "\"jaffle_db\".\"public\".\"fct_orders\"",
+      "config": {"materialized": "table"}
+    },
+    "model.jaffle_shop.int_orders_pivoted": {
+      "resource_type": "model",
+      "name": "int_orders_pivoted",
+      "alias": "int_orders_pivoted",
+      "database": "jaffle_db",
+      "schema": "public",
+      "fqn": ["jaffle_shop", "intermediate", "int_orders_pivoted"],
+      "relation_name": null,
+      "config": {"materialized": "ephemeral"}
+    },
+    "model.jaffle_shop.dim_customers_inc": {
+      "resource_type": "model",
+      "name": "dim_customers_inc",
+      "alias": "dim_customers_inc",
+      "database": "jaffle_db",
+      "schema": "public",
+      "fqn": ["jaffle_shop", "marts", "dim_customers_inc"],
+      "relation_name": "\"jaffle_db\".\"public\".\"dim_customers_inc\"",
+      "config": {"materialized": "incremental"}
+    },
+    "test.jaffle_shop.unique_stg_customers_id.abc123": {
+      "resource_type": "test",
+      "name": "unique_stg_customers_id",
+      "config": {}
+    },
+    "seed.jaffle_shop.raw_customers": {
+      "resource_type": "seed",
+      "name": "raw_customers",
+      "config": {"materialized": "seed"}
+    }
+  },
+  "sources": {
+    "source.jaffle_shop.raw.payments": {
+      "resource_type": "source",
+      "name": "payments",
+      "identifier": "raw_payments",
+      "database": "jaffle_db",
+      "schema": "raw",
+      "relation_name": "\"jaffle_db\".\"raw\".\"raw_payments\""
+    }
+  }
+}
