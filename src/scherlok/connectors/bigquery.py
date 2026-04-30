@@ -41,14 +41,55 @@ class BigQueryConnector(BaseConnector):
         """Validate connection to BigQuery."""
         try:
             from google.cloud import bigquery
+        except ImportError:
+            self._last_error = (
+                "google-cloud-bigquery not installed\n"
+                "  Hint: pip install scherlok[bigquery]"
+            )
+            return False
 
+        try:
             self._client = bigquery.Client(project=self._project)
             # Validate by listing tables (lightweight call)
             dataset_ref = self._client.dataset(self._dataset)
             list(self._client.list_tables(dataset_ref, max_results=1))
             return True
-        except Exception:
+        except Exception as exc:
+            self._last_error = self._classify_error(str(exc))
             return False
+
+    @staticmethod
+    def _classify_error(message: str) -> str:
+        """Map google-cloud-bigquery error text to a short, actionable hint."""
+        msg = message.strip()
+        lowered = msg.lower()
+        if (
+            "default credentials" in lowered
+            or "could not automatically determine credentials" in lowered
+        ):
+            return (
+                "Application Default Credentials not found\n"
+                "  Hint: gcloud auth application-default login"
+            )
+        if "permission denied" in lowered or "forbidden" in lowered or "403" in lowered:
+            return (
+                "permission denied — the authenticated identity lacks access to this dataset\n"
+                "  Hint: grant `roles/bigquery.dataViewer` and `roles/bigquery.jobUser`"
+            )
+        if "not found" in lowered and "dataset" in lowered:
+            return (
+                "dataset not found — check the dataset name and project\n"
+                "  Hint: bigquery://<project>/<dataset>"
+            )
+        if "not found" in lowered and "project" in lowered:
+            return "project not found — check the project ID in your connection string"
+        if "billing" in lowered:
+            return (
+                "billing not enabled on the project\n"
+                "  Hint: enable billing in the GCP console for this project"
+            )
+        first_line = msg.splitlines()[0] if msg else "unknown error"
+        return first_line
 
     def _query(self, sql: str) -> list[dict]:
         """Execute a query and return results as list of dicts."""

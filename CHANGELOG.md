@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`--verbose` / `-v` and `--quiet` / `-q` global flags** added to all commands. `--quiet` silences progress chatter while keeping anomaly results and errors (CI-friendly). `--verbose` adds per-table profiling timings and column counts.
+- **Connector error messages now include actionable hints.** `Failed to connect.` is followed by a one-line explanation of what went wrong, plus a hint when applicable.
+  - **Postgres:** classifies "connection refused" / "auth failed" / "database does not exist" / "SSL required" / timeout / unknown host
+  - **Snowflake:** detects missing `SNOWFLAKE_USER` / `SNOWFLAKE_PASSWORD`, missing python connector, auth failures, account/warehouse/database not found
+  - **BigQuery:** detects missing google-cloud-bigquery, missing Application Default Credentials, permission denied, project/dataset not found, billing not enabled
+
 ### Added
 - **HTML dashboard** — new `scherlok dashboard` command. Generates a self-contained HTML report (~28 KB) from the local profile store: KPIs, per-table incidents grouped with summary/threshold/first-seen, schema-drift `+`/`-`/`~` diff, sparklines, and history. Auto dark/light theme via `prefers-color-scheme` (`--theme dark|light` to override). No external URLs in the rendered file — works offline, screenshot-friendly.
   - Adds `jinja2>=3.0` to core dependencies

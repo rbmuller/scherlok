@@ -1,5 +1,6 @@
 """CLI entry point for Scherlok. Built with Typer and Rich."""
 
+import time
 from pathlib import Path
 
 import typer
@@ -19,6 +20,9 @@ from scherlok.detector.distribution_shift import detect_distribution_shift
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.nullability import detect_nullability_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
+from scherlok.output import error as out_error
+from scherlok.output import info as out_info
+from scherlok.output import is_quiet, verbose_info
 from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
@@ -34,6 +38,22 @@ app = typer.Typer(
 console = Console()
 
 
+@app.callback()
+def _root_callback(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="Show detailed progress (per-table timings, query previews).",
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q",
+        help="Suppress non-essential output. Errors and exit codes still surface.",
+    ),
+) -> None:
+    """Root callback: wire global verbosity flags into scherlok.output."""
+    from scherlok.output import set_verbosity
+    set_verbosity(verbose=verbose, quiet=quiet)
+
+
 def _get_connector_or_exit() -> object:
     """Load config and return a connected connector, or exit with error."""
     cfg = ScherlokConfig.load()
@@ -46,9 +66,17 @@ def _get_connector_or_exit() -> object:
         raise typer.Exit(code=1)
     connector = get_connector(conn_str)
     if not connector.connect():
-        console.print("[red]Failed to connect to the database.[/red]")
+        _print_connect_failure(connector)
         raise typer.Exit(code=1)
     return connector
+
+
+def _print_connect_failure(connector: object) -> None:
+    """Render a 'failed to connect' header plus connector.last_error if available."""
+    console.print("[red]Failed to connect to the database.[/red]")
+    err = getattr(connector, "last_error", None)
+    if err:
+        console.print(f"  [dim]{err}[/dim]")
 
 
 @app.command()
@@ -73,7 +101,7 @@ def connect(
         tables = connector.list_tables()
         console.print(f"[green]Connected successfully.[/green] Found {len(tables)} tables.")
     else:
-        console.print("[red]Connection failed.[/red] Check your connection string.")
+        _print_connect_failure(connector)
         raise typer.Exit(code=1)
 
 
@@ -116,13 +144,14 @@ def investigate() -> None:
         tables = connector.list_tables()
 
         if not tables:
-            console.print("[yellow]No tables found.[/yellow]")
+            out_info("[yellow]No tables found.[/yellow]")
             raise typer.Exit(code=0)
 
-        console.print(f"Investigating [bold]{len(tables)}[/bold] tables...")
+        out_info(f"Investigating [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
-            console.print(f"  Profiling [cyan]{table}[/cyan]...")
+            t_start = time.perf_counter()
+            out_info(f"  Profiling [cyan]{table}[/cyan]...")
 
             vol = profile_volume(connector, table)
             store.save_profile(table, "volume", vol)
@@ -137,7 +166,13 @@ def investigate() -> None:
                 dist = profile_distribution(connector, table, col["name"])
                 store.save_profile(table, f"distribution:{col['name']}", dist)
 
-        console.print(
+            verbose_info(
+                f"{table}: {vol.get('row_count', 0)} rows · "
+                f"{len(sch.get('columns', []))} cols · "
+                f"{time.perf_counter() - t_start:.2f}s"
+            )
+
+        out_info(
             f"[green]Investigation complete.[/green] {len(tables)} tables profiled."
         )
 
@@ -198,20 +233,23 @@ def _dispatch_alerts(
 ) -> None:
     """Persist anomalies and fan out to webhook/email alerters."""
     if not anomalies:
-        console.print("[green]No anomalies detected.[/green]")
+        out_info("[green]No anomalies detected.[/green]")
         return
     store.save_anomalies(anomalies)
-    print_anomalies(anomalies)
+    if not is_quiet():
+        print_anomalies(anomalies)
     if webhook:
         ok = send_webhook(webhook, anomalies)
-        console.print(
-            "[dim]Webhook sent.[/dim]" if ok else "[red]Webhook delivery failed.[/red]"
-        )
+        if ok:
+            verbose_info("Webhook delivered.")
+        else:
+            out_error("[red]Webhook delivery failed.[/red]")
     if emails:
         ok = send_email_alert(emails, anomalies)
-        console.print(
-            "[dim]Email sent.[/dim]" if ok else "[red]Email delivery failed.[/red]"
-        )
+        if ok:
+            verbose_info("Email delivered.")
+        else:
+            out_error("[red]Email delivery failed.[/red]")
 
 
 def _run_watch(
@@ -237,7 +275,7 @@ def _run_watch(
             tables = connector.list_tables()
         all_anomalies: list[dict] = []
 
-        console.print(f"Watching [bold]{len(tables)}[/bold] tables...")
+        out_info(f"Watching [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
             anomalies, _ = _watch_table(connector, store, table)
@@ -306,7 +344,7 @@ def ci(
     # Validate connection
     connector = get_connector(connection_string)
     if not connector.connect():
-        console.print("[red]Failed to connect.[/red]")
+        _print_connect_failure(connector)
         raise typer.Exit(code=1)
 
     # Run watch (does profile + detect + alert in one)
@@ -416,7 +454,7 @@ def dbt(
 
     connector = get_connector(conn_str)
     if not connector.connect():
-        console.print("[red]Failed to connect using the resolved connection.[/red]")
+        _print_connect_failure(connector)
         raise typer.Exit(code=1)
 
     # 3. Match models to physical tables visible to the connector
@@ -430,12 +468,12 @@ def dbt(
         else:
             matched.append((node, physical))
 
-    console.print(
+    out_info(
         f"Investigating [bold]{len(matched)}[/bold] dbt {'nodes' if include_sources else 'models'} "
         f"in [cyan]{project_dir}[/cyan] ([dim]{adapter}[/dim])"
     )
     if missing:
-        console.print(
+        out_info(
             f"[yellow]Skipped {len(missing)} not found in {adapter}: "
             f"{', '.join(n.name for n in missing[:5])}"
             f"{' …' if len(missing) > 5 else ''}[/yellow]"
@@ -455,7 +493,7 @@ def dbt(
     # 5. Summary + exit code
     crit = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("CRITICAL"))
     warn = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("WARNING"))
-    console.print(
+    out_info(
         f"\n[bold]Summary:[/bold] {len(matched)} profiled, "
         f"{len(all_anomalies)} anomalies "
         f"([red]{crit} critical[/red], [yellow]{warn} warning[/yellow])"
@@ -490,18 +528,21 @@ def _resolve_physical_table(node: object, visible: set[str]) -> str | None:
 def _print_dbt_model_result(
     node: object, physical: str, current_vol: dict, anomalies: list[dict]
 ) -> None:
-    """Print one ✓/✗ line for a dbt model with row count or anomaly summary."""
+    """Print one ✓/✗ line for a dbt model with row count or anomaly summary.
+
+    ✓ rows respect --quiet (gone with quiet); ✗ rows always print so CI logs
+    surface the failures even on --quiet.
+    """
     name = node.name  # type: ignore[attr-defined]
     if not anomalies:
         rows = current_vol.get("row_count", "?")
-        console.print(f"  [green]✓[/green] {name:<30} ({rows:,} rows)")
+        out_info(f"  [green]✓[/green] {name:<30} ({rows:,} rows)")
         return
-    # Show the worst anomaly summary on the line
     severities = [str(a.get("severity")) for a in anomalies]
     worst = "CRITICAL" if any("CRITICAL" in s for s in severities) else "WARNING"
     color = "red" if worst == "CRITICAL" else "yellow"
     msg = anomalies[0].get("message", "anomaly detected")
-    console.print(f"  [{color}]✗[/{color}] {name:<30} {worst}: {msg}")
+    out_error(f"  [{color}]✗[/{color}] {name:<30} {worst}: {msg}")
 
 
 @app.command()

@@ -44,16 +44,32 @@ class SnowflakeConnector(BaseConnector):
 
     def connect(self) -> bool:
         """Validate and establish connection to Snowflake."""
+        import os
+
         try:
-            import os
-
             import snowflake.connector
+        except ImportError:
+            self._last_error = (
+                "snowflake-connector-python not installed\n"
+                "  Hint: pip install scherlok[snowflake]"
+            )
+            return False
 
-            user = os.environ.get("SNOWFLAKE_USER")
-            password = os.environ.get("SNOWFLAKE_PASSWORD")
-            if not user or not password:
-                return False
+        user = os.environ.get("SNOWFLAKE_USER")
+        password = os.environ.get("SNOWFLAKE_PASSWORD")
+        if not user or not password:
+            missing = []
+            if not user:
+                missing.append("SNOWFLAKE_USER")
+            if not password:
+                missing.append("SNOWFLAKE_PASSWORD")
+            self._last_error = (
+                f"missing required env var{'s' if len(missing) > 1 else ''}: {', '.join(missing)}\n"
+                f"  Hint: export {missing[0]}=... (and SNOWFLAKE_WAREHOUSE/ROLE if needed)"
+            )
+            return False
 
+        try:
             self._conn = snowflake.connector.connect(
                 account=self._account,
                 user=user,
@@ -69,8 +85,35 @@ class SnowflakeConnector(BaseConnector):
             cur.fetchone()
             cur.close()
             return True
-        except Exception:
+        except Exception as exc:
+            self._last_error = self._classify_error(str(exc))
             return False
+
+    @staticmethod
+    def _classify_error(message: str) -> str:
+        """Map Snowflake error text to a short, actionable hint."""
+        msg = message.strip()
+        lowered = msg.lower()
+        if "incorrect username or password" in lowered or "authentication" in lowered:
+            return (
+                "authentication failed — check SNOWFLAKE_USER and SNOWFLAKE_PASSWORD\n"
+                "  Hint: if your account has SSO/MFA, key-pair auth is required"
+            )
+        if "account" in lowered and ("not found" in lowered or "does not exist" in lowered):
+            return (
+                "account not found — check the connection string format\n"
+                "  Hint: snowflake://<account>/<database>/<schema> "
+                "(account looks like 'xy12345.us-east-1')"
+            )
+        if "warehouse" in lowered and ("not found" in lowered or "does not exist" in lowered):
+            return (
+                "warehouse not found — set SNOWFLAKE_WAREHOUSE to a valid warehouse\n"
+                "  Hint: SHOW WAREHOUSES in Snowflake to list available ones"
+            )
+        if "database" in lowered and "does not exist" in lowered:
+            return "database not found — check the database name in your connection string"
+        first_line = msg.splitlines()[0] if msg else "unknown error"
+        return first_line
 
     def _query(self, sql: str) -> list[dict]:
         """Execute a query and return results as list of dicts."""
