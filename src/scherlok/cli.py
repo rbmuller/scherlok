@@ -79,17 +79,45 @@ def _print_connect_failure(connector: object) -> None:
         console.print(f"  [dim]{err}[/dim]")
 
 
+CONNECT_EXAMPLES: list[tuple[str, str]] = [
+    ("postgres", "postgresql://user:pass@localhost:5432/mydb"),
+    ("bigquery", "bigquery://my-gcp-project/my_dataset"),
+    ("snowflake", "snowflake://my-account/my_database/PUBLIC"),
+]
+
+
+def _print_connect_examples() -> None:
+    """Print one example connection string per supported adapter."""
+    console.print("[bold]Usage:[/bold] scherlok connect <connection_string>")
+    console.print()
+    console.print("Examples for each supported adapter:")
+    for scheme, example in CONNECT_EXAMPLES:
+        console.print(f"  [cyan]{scheme:<10}[/cyan] [dim]{example}[/dim]")
+    console.print()
+    console.print(
+        "Re-run with one of these as the argument to validate the connection "
+        "and save it to config."
+    )
+
+
 @app.command()
 def connect(
     connection_string: str = typer.Argument(
-        ..., help="Database connection string (e.g. postgresql://user:pass@host/db)"
+        None, help="Database connection string (e.g. postgresql://user:pass@host/db)"
     ),
 ) -> None:
     """Validate a database connection and save it to config.
 
+    Run with no argument to print example connection strings for each
+    supported adapter.
+
     Example:
         scherlok connect postgresql://user:pass@localhost:5432/mydb
     """
+    if not connection_string:
+        _print_connect_examples()
+        raise typer.Exit(code=0)
+
     connector = get_connector(connection_string)
     with console.status("Connecting..."):
         ok = connector.connect()
