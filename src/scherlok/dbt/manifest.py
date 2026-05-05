@@ -66,17 +66,34 @@ def load_manifest(project_dir: str | Path) -> dict:
     return manifest
 
 
-def discover_models(manifest: dict) -> list[DbtNode]:
-    """Return all materialized models (table/incremental/view) from the manifest."""
+def discover_models(manifest: dict, include_snapshots: bool = False) -> list[DbtNode]:
+    """Return all materialized models (table/incremental/view) from the manifest.
+
+    Args:
+        manifest: Loaded manifest.json dict.
+        include_snapshots: When True, also include snapshot nodes. Snapshots are
+            SCD Type 2 tables that physically exist in the warehouse and are
+            profilable like any other materialized model. Defaults to False to
+            preserve the v0 behavior of skipping snapshots.
+    """
     adapter = manifest.get("metadata", {}).get("adapter_type", "")
     nodes = manifest.get("nodes", {})
     models: list[DbtNode] = []
 
     for unique_id, node in nodes.items():
-        if node.get("resource_type") != "model":
-            continue
+        resource_type = node.get("resource_type")
         materialized = node.get("config", {}).get("materialized", "")
-        if materialized not in MATERIALIZED_PHYSICAL:
+
+        if resource_type == "model":
+            if materialized not in MATERIALIZED_PHYSICAL:
+                continue
+        elif resource_type == "snapshot" and include_snapshots:
+            # dbt snapshots set config.materialized to "snapshot". The underlying
+            # physical relation is a table, so they are profilable like any other
+            # materialized model. We preserve the original value so callers can
+            # distinguish snapshots from regular models via DbtNode.materialized.
+            pass
+        else:
             continue
 
         identifier = node.get("alias") or node.get("name", "")
@@ -84,7 +101,7 @@ def discover_models(manifest: dict) -> list[DbtNode]:
             DbtNode(
                 unique_id=unique_id,
                 name=node.get("name", ""),
-                resource_type="model",
+                resource_type=resource_type,
                 materialized=materialized,
                 database=node.get("database", "") or "",
                 schema=node.get("schema", "") or "",
