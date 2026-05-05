@@ -502,8 +502,9 @@ def dbt(
         else:
             matched.append((node, physical))
 
+    node_label = "nodes" if (include_sources or include_snapshots) else "models"
     out_info(
-        f"Investigating [bold]{len(matched)}[/bold] dbt {'nodes' if include_sources else 'models'} "
+        f"Investigating [bold]{len(matched)}[/bold] dbt {node_label} "
         f"in [cyan]{project_dir}[/cyan] ([dim]{adapter}[/dim])"
     )
     if missing:

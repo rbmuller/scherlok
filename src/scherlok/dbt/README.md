@@ -28,7 +28,7 @@ First run = baseline. Subsequent runs detect drift.
 ## How it discovers what to profile
 
 - **Materialized models only.** Models with `materialized: ephemeral` are skipped (they don't exist in the warehouse).
-- **Tests / seeds / snapshots are skipped** in v0 — only `resource_type: model` (and optionally `source` with `--include-sources`) are profiled.
+- **Tests and seeds are skipped** — only `resource_type: model` (and optionally `source` via `--include-sources`, `snapshot` via `--include-snapshots`) are profiled.
 - **Filtering:** `--select fct_orders --select stg_orders` profiles only the listed models.
 
 ## Supported adapters
@@ -86,6 +86,5 @@ Add Scherlok as a gate after `dbt run`:
 - No support for ephemeral models (they're not materialized — nothing to profile).
 - No support for adapter-specific Jinja in `profiles.yml` beyond `env_var`.
 - Lineage is **not yet** read from the manifest — anomalies are reported per-model with no downstream impact.
-- Snapshots are not profiled in v0.
 
 If you hit one of these, please open an issue.
