@@ -411,6 +411,12 @@ def dbt(
     include_sources: bool = typer.Option(
         False, "--include-sources", help="Also profile dbt sources, not only models"
     ),
+    include_snapshots: bool = typer.Option(
+        False,
+        "--include-snapshots",
+        help="Also profile dbt snapshots. Snapshots are SCD Type 2 tables that exist "
+        "in the warehouse and are profilable like regular materialized models.",
+    ),
     webhook: str = typer.Option(
         None, "--webhook", "-w", help="Webhook URL for alerts"
     ),
@@ -449,7 +455,7 @@ def dbt(
         raise typer.Exit(code=1) from exc
 
     adapter = manifest.get("metadata", {}).get("adapter_type", "?")
-    nodes: list[DbtNode] = discover_models(manifest)
+    nodes: list[DbtNode] = discover_models(manifest, include_snapshots=include_snapshots)
     if include_sources:
         nodes.extend(discover_sources(manifest))
 

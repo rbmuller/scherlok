@@ -96,3 +96,65 @@ def test_load_manifest_unsupported_adapter(tmp_path):
     )
     with pytest.raises(ValueError, match="Unsupported dbt adapter 'redshift'"):
         load_manifest(tmp_path)
+
+
+def _manifest_with_snapshot() -> dict:
+    """Build a minimal manifest containing one model and one snapshot."""
+    return {
+        "metadata": {
+            "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+            "adapter_type": "postgres",
+        },
+        "nodes": {
+            "model.demo.fct_orders": {
+                "resource_type": "model",
+                "name": "fct_orders",
+                "alias": "fct_orders",
+                "database": "demo_db",
+                "schema": "public",
+                "relation_name": '"demo_db"."public"."fct_orders"',
+                "config": {"materialized": "table"},
+            },
+            "snapshot.demo.orders_snapshot": {
+                "resource_type": "snapshot",
+                "name": "orders_snapshot",
+                "alias": "orders_snapshot",
+                "database": "demo_db",
+                "schema": "snapshots",
+                "relation_name": '"demo_db"."snapshots"."orders_snapshot"',
+                "config": {"materialized": "snapshot"},
+            },
+        },
+        "sources": {},
+    }
+
+
+def test_discover_models_skips_snapshots_by_default():
+    manifest = _manifest_with_snapshot()
+    models = discover_models(manifest)
+    names = {m.name for m in models}
+    assert "fct_orders" in names
+    assert "orders_snapshot" not in names
+
+
+def test_discover_models_include_snapshots_picks_up_snapshot_nodes():
+    manifest = _manifest_with_snapshot()
+    models = discover_models(manifest, include_snapshots=True)
+    names = {m.name for m in models}
+    assert names == {"fct_orders", "orders_snapshot"}
+
+    snap = next(m for m in models if m.name == "orders_snapshot")
+    assert snap.resource_type == "snapshot"
+    assert snap.materialized == "snapshot"
+    assert snap.database == "demo_db"
+    assert snap.schema == "snapshots"
+    assert snap.identifier == "orders_snapshot"
+    assert snap.adapter == "postgres"
+
+
+def test_discover_models_include_snapshots_no_op_when_no_snapshots():
+    """include_snapshots=True does not change behavior when no snapshots exist."""
+    manifest = load_manifest(PG_PROJECT)
+    default = discover_models(manifest)
+    expanded = discover_models(manifest, include_snapshots=True)
+    assert {m.unique_id for m in default} == {m.unique_id for m in expanded}
