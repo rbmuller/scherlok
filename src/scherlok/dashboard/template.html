@@ -50,6 +50,27 @@
     </div>
   </div>
 
+  {% if trend %}
+  <section class="trend">
+    <h2>Anomaly trend · last {{ kpis.history_days }} days</h2>
+    {% if trend | sum(attribute='count') == 0 %}
+    <div class="empty">No anomalies in this window.</div>
+    {% else %}
+    <svg class="trend-svg" viewBox="0 0 {{ trend | length * 14 }} 60" width="100%" height="60" preserveAspectRatio="none">
+      {% set max_count = trend | map(attribute='count') | max %}
+      {% for day in trend %}
+      <rect class="trend-bar {{ day.severity }}"
+            x="{{ loop.index0 * 14 + 2 }}" y="{{ 50 - (day.count / max_count * 48) if max_count else 50 }}"
+            width="10" height="{{ (day.count / max_count * 48) if max_count else 0 }}"
+            rx="1">
+        <title>{{ day.date }}: {{ day.count }} anomalies</title>
+      </rect>
+      {% endfor %}
+    </svg>
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if dbt_context %}
   <section>
     <h2>dbt context</h2>

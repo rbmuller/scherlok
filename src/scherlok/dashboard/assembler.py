@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from scherlok import __version__
 from scherlok.dashboard.grouping import Incident, group_anomalies
@@ -42,6 +42,7 @@ def assemble_view(
         "meta": meta,
         "kpis": kpis,
         "dbt_context": dbt_context,
+        "trend": _anomaly_trend(anomalies, days),
         "incidents": incidents,
         "tables": tables,
         "history": history,
@@ -129,6 +130,52 @@ def _sparkline_path(points: list[int], status: str) -> str:
         y = 18 - ((v - lo) / span) * 16
         coords.append(f"{x:.1f},{y:.1f}")
     return "M" + " L".join(coords)
+
+
+def _anomaly_trend(anomalies: list[dict], days: int) -> list[dict]:
+    """Return daily anomaly counts oldest -> newest for the dashboard chart."""
+    if days <= 0:
+        return []
+
+    today = datetime.now(timezone.utc).date()
+    buckets: dict[str, list[str]] = {}
+    for anomaly in anomalies:
+        detected_at = anomaly.get("detected_at")
+        if not detected_at:
+            continue
+        try:
+            detected_date = datetime.fromisoformat(
+                detected_at.replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            continue
+        buckets.setdefault(detected_date.isoformat(), []).append(
+            _severity_value(anomaly.get("severity"))
+        )
+
+    trend = []
+    for offset in range(days - 1, -1, -1):
+        day = today - timedelta(days=offset)
+        date_key = day.isoformat()
+        severities = buckets.get(date_key, [])
+        trend.append({
+            "date": date_key,
+            "count": len(severities),
+            "severity": _max_daily_severity(severities),
+        })
+    return trend
+
+
+def _severity_value(severity: object) -> str:
+    return str(getattr(severity, "value", severity or "")).upper()
+
+
+def _max_daily_severity(severities: list[str]) -> str:
+    if "CRITICAL" in severities:
+        return "critical"
+    if "WARNING" in severities:
+        return "warning"
+    return "healthy"
 
 
 def _kpis(tables: list[dict], incidents: list[Incident], days: int) -> dict:

@@ -1,5 +1,6 @@
 """End-to-end render tests + golden HTML snapshot for dashboard regressions."""
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,40 @@ def test_render_dbt_context_omitted_when_none(store_with_data):
     """The dbt-card div only renders when dbt_context is provided."""
     html = render_dashboard(store_with_data, dbt_context=None)
     assert "<div class=\"dbt-card\">" not in html
+
+
+def test_render_anomaly_trend_renders(tmp_path: Path):
+    store = ProfileStore(db_path=tmp_path / "profiles.db")
+    try:
+        for days_ago, severity in [
+            (0, Severity.WARNING),
+            (2, Severity.CRITICAL),
+            (5, Severity.WARNING),
+        ]:
+            store.save_anomalies([
+                {
+                    "table": "orders",
+                    "type": "volume_drop",
+                    "severity": severity,
+                    "message": f"Anomaly from {days_ago} days ago",
+                },
+            ])
+            detected_at = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+            store._conn.execute(  # noqa: SLF001
+                "UPDATE anomalies SET detected_at = ? WHERE id = (SELECT MAX(id) FROM anomalies)",
+                (detected_at,),
+            )
+            store._conn.commit()  # noqa: SLF001
+
+        html = render_dashboard(store)
+    finally:
+        store.close()
+
+    assert 'class="trend"' in html
+    assert 'class="trend-svg"' in html
+    assert html.count('class="trend-bar') == 14
+    assert 'class="trend-bar critical"' in html
+    assert 'class="trend-bar warning"' in html
 
 
 def test_render_redacts_password(store_with_data):
