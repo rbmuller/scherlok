@@ -175,6 +175,8 @@ def _max_daily_severity(severities: list[str]) -> str:
         return "critical"
     if "WARNING" in severities:
         return "warning"
+    if "INFO" in severities:
+        return "info"
     return "healthy"
 
 

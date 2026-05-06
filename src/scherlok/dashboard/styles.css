@@ -97,6 +97,7 @@ section h2 {
 .trend-bar { shape-rendering: crispEdges; }
 .trend-bar.critical { fill: var(--red); }
 .trend-bar.warning { fill: var(--yellow); }
+.trend-bar.info { fill: var(--muted); opacity: 0.4; }
 .trend-bar.healthy { fill: var(--green); opacity: 0.18; }
 .trend .empty { padding: 18px; font-size: 13px; color: var(--muted); }
 

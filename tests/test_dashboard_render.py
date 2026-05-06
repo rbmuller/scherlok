@@ -67,6 +67,7 @@ def test_render_anomaly_trend_renders(tmp_path: Path):
             (0, Severity.WARNING),
             (2, Severity.CRITICAL),
             (5, Severity.WARNING),
+            (7, Severity.INFO),
         ]:
             store.save_anomalies([
                 {
@@ -92,6 +93,7 @@ def test_render_anomaly_trend_renders(tmp_path: Path):
     assert html.count('class="trend-bar') == 14
     assert 'class="trend-bar critical"' in html
     assert 'class="trend-bar warning"' in html
+    assert 'class="trend-bar info"' in html
 
 
 def test_render_redacts_password(store_with_data):
