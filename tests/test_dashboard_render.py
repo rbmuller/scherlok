@@ -90,7 +90,8 @@ def test_render_anomaly_trend_renders(tmp_path: Path):
 
     assert 'class="trend"' in html
     assert 'class="trend-svg"' in html
-    assert html.count('class="trend-bar') == 14
+    # default 14-day window emits 15 bars (cutoff date inclusive)
+    assert html.count('class="trend-bar') == 15
     assert 'class="trend-bar critical"' in html
     assert 'class="trend-bar warning"' in html
     assert 'class="trend-bar info"' in html

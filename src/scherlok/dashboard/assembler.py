@@ -154,7 +154,11 @@ def _anomaly_trend(anomalies: list[dict], days: int) -> list[dict]:
         )
 
     trend = []
-    for offset in range(days - 1, -1, -1):
+    # Emit days+1 bars so the cutoff date itself is included. ProfileStore's
+    # `get_anomaly_history(days=N)` uses a `now() - N days` SQL cutoff, so an
+    # anomaly with `detected_at == today - N` is part of the window. Without
+    # this extra bar the chart silently dropped that day's anomalies.
+    for offset in range(days, -1, -1):
         day = today - timedelta(days=offset)
         date_key = day.isoformat()
         severities = buckets.get(date_key, [])
