@@ -187,6 +187,33 @@
   </section>
   {% endif %}
 
+  {% if stale_tables %}
+  <section>
+    <h2>Stale tables · {{ stale_tables | length }}</h2>
+    <p class="muted">Tables whose last profile is older than the freshness threshold; check for silent ETL failures.</p>
+    <div class="grid">
+      <table>
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Last profiled</th>
+            <th class="num">Age</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in stale_tables %}
+          <tr>
+            <td class="name">{{ t.name }}</td>
+            <td class="muted">{{ t.last_profiled }}</td>
+            <td class="num">{{ '%.1f' % t.age_hours }}h</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
   {% if history %}
   <section>
     <h2>Recent anomaly history ({{ kpis.history_days }} days)</h2>
