@@ -21,8 +21,13 @@ def store(tmp_path: Path):
     s.close()
 
 
-def _seed_profile(store: ProfileStore, table: str, rows: int):
-    store.save_profile(table, "volume", {"row_count": rows, "timestamp": "2026-04-30T12:00:00Z"})
+def _seed_profile(
+    store: ProfileStore,
+    table: str,
+    rows: int,
+    timestamp: str = "2026-04-30T12:00:00Z",
+):
+    store.save_profile(table, "volume", {"row_count": rows, "timestamp": timestamp})
     store.save_profile(table, "schema", {"columns": [{"name": "id", "type": "int"}]})
     store.save_profile(table, "freshness", {})
 
@@ -43,6 +48,27 @@ def test_assemble_with_profiles_no_anomalies(store):
     assert view["kpis"]["critical"] == 0
     assert view["kpis"]["warnings"] == 0
     assert {t["name"] for t in view["tables"]} == {"orders", "users"}
+
+
+def test_assemble_stale_tables_lists_only_tables_over_threshold(store):
+    now = datetime.now(timezone.utc)
+    _seed_profile(store, "fresh_orders", 1000, (now - timedelta(hours=1)).isoformat())
+    _seed_profile(store, "stale_orders", 900, (now - timedelta(hours=48)).isoformat())
+
+    view = assemble_view(store)
+
+    assert [table["name"] for table in view["stale_tables"]] == ["stale_orders"]
+    assert view["stale_tables"][0]["age_hours"] >= 48
+
+
+def test_assemble_stale_tables_empty_when_all_tables_are_fresh(store):
+    now = datetime.now(timezone.utc)
+    _seed_profile(store, "orders", 1000, (now - timedelta(hours=1)).isoformat())
+    _seed_profile(store, "users", 500, (now - timedelta(hours=2)).isoformat())
+
+    view = assemble_view(store)
+
+    assert view["stale_tables"] == []
 
 
 def test_assemble_active_anomalies_split_from_history(store):

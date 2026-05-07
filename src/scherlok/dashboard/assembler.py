@@ -10,6 +10,7 @@ from scherlok.store.sqlite import ProfileStore
 
 SPARKLINE_POINTS = 8
 DEFAULT_HISTORY_DAYS = 14
+STALE_TABLE_THRESHOLD_HOURS = 24
 
 
 def assemble_view(
@@ -29,6 +30,7 @@ def assemble_view(
     incidents = group_anomalies(active)
 
     tables = _build_table_health(store, days, incidents)
+    stale_tables = _build_stale_tables(store, days, tables)
 
     kpis = _kpis(tables, incidents, days)
     meta = _meta(
@@ -45,6 +47,7 @@ def assemble_view(
         "trend": _anomaly_trend(anomalies, days),
         "incidents": incidents,
         "tables": tables,
+        "stale_tables": stale_tables,
         "history": history,
     }
 
@@ -90,10 +93,47 @@ def _build_table_health(
             "rows": vol.get("row_count", 0),
             "cols": len(sch.get("columns", [])) if sch else 0,
             "last_profiled": _humanize_iso(vol.get("timestamp")),
+            "last_profiled_iso": vol.get("timestamp"),
             "sparkline_path": _sparkline_path(history_pts, status),
             "trend_points": history_pts,
         })
     return out
+
+
+def _build_stale_tables(
+    store: ProfileStore,
+    days: int,
+    tables: list[dict],
+) -> list[dict]:
+    """Return tables whose latest volume profile is older than the freshness threshold."""
+    del store, days
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=STALE_TABLE_THRESHOLD_HOURS)
+    stale_tables = []
+
+    for table in tables:
+        last_profiled_iso = table.get("last_profiled_iso")
+        if not last_profiled_iso:
+            continue
+
+        try:
+            last_profiled = datetime.fromisoformat(last_profiled_iso.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+
+        if last_profiled.tzinfo is None:
+            last_profiled = last_profiled.replace(tzinfo=timezone.utc)
+
+        if last_profiled <= cutoff:
+            age_hours = (now - last_profiled).total_seconds() / 3600
+            stale_tables.append({
+                "name": table["name"],
+                "last_profiled": table["last_profiled"],
+                "age_hours": age_hours,
+            })
+
+    return sorted(stale_tables, key=lambda table: table["age_hours"], reverse=True)
 
 
 def _discover_tables(store: ProfileStore) -> set[str]:
