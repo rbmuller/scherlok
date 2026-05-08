@@ -265,6 +265,25 @@ pip install scherlok[bigquery]
 
 Requires Python 3.10+.
 
+### Run via Docker
+
+A pre-built image with every warehouse extra (`dbt`, `bigquery`, `snowflake`) is published to GitHub Container Registry on every release tag:
+
+```bash
+docker run --rm ghcr.io/rbmuller/scherlok:latest version
+```
+
+Mount your project directory and inject connection details the same way your CI does it; the entrypoint is the `scherlok` CLI:
+
+```bash
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  -e SCHERLOK_CONNECTION=postgres://... \
+  ghcr.io/rbmuller/scherlok:latest watch
+```
+
+The image is built from `python:3.12-slim` and runs unprivileged (`USER scherlok`).
+
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).

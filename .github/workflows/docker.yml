@@ -1,0 +1,64 @@
+name: Docker
+
+# Builds the scherlok container image and publishes it to GitHub Container
+# Registry (ghcr.io/rbmuller/scherlok) on every release tag, mirroring the
+# trigger of release.yml so PyPI and GHCR ship together.
+#
+# Per-PR / per-push validation lives in ci.yml. This workflow is gated on
+# tags so non-release branches do not block on a Docker build.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  # push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: tags
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/rbmuller/scherlok:${{ steps.tags.outputs.version }}
+            ghcr.io/rbmuller/scherlok:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/rbmuller/scherlok
+            org.opencontainers.image.description=Scherlok data anomaly detection CLI
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ steps.tags.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test image
+        run: |
+          docker run --rm \
+            "ghcr.io/rbmuller/scherlok:${{ steps.tags.outputs.version }}" \
+            version
