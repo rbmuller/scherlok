@@ -1,6 +1,8 @@
 """CLI entry point for Scherlok. Built with Typer and Rich."""
 
 import json
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -657,6 +659,107 @@ def _dbt_impl(
     else:
         if exit_code_for(all_anomalies) == 1:
             raise typer.Exit(code=1)
+
+
+@app.command(name="dbt-run-and-watch")
+def dbt_run_and_watch(
+    project_dir: str = typer.Option(
+        ".", "--project-dir", help="Path to dbt project root (containing dbt_project.yml)"
+    ),
+    profiles_dir: str = typer.Option(
+        None, "--profiles-dir", help="Path to dir containing profiles.yml (default: ~/.dbt)"
+    ),
+    target: str = typer.Option(
+        None, "--target", help="dbt target to use (default: profile's `target:` key)"
+    ),
+    connection_string: str = typer.Option(
+        None, "--connection-string",
+        help="Override profiles.yml resolution and use this connection string directly",
+    ),
+    select: list[str] = typer.Option(
+        None, "--select", "-s",
+        help=(
+            "Only profile these models. Also passed to `dbt run` as --select. "
+            "Repeat to select multiple."
+        ),
+    ),
+    include_sources: bool = typer.Option(
+        False, "--include-sources", help="Also profile dbt sources, not only models"
+    ),
+    include_snapshots: bool = typer.Option(
+        False,
+        "--include-snapshots",
+        help="Also profile dbt snapshots. Snapshots are SCD Type 2 tables that exist "
+        "in the warehouse and are profilable like regular materialized models.",
+    ),
+    webhook: str = typer.Option(
+        None, "--webhook", "-w", help="Webhook URL for alerts"
+    ),
+    email: list[str] = typer.Option(
+        None, "--email", "-e", help="Email recipient(s) for alerts"
+    ),
+    fail_on: str = typer.Option(
+        "critical", "--fail-on",
+        help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
+    ),
+) -> None:
+    """Run `dbt run` then immediately profile the freshly built models.
+
+    Wraps the typical CI sequence (`dbt run` -> `scherlok dbt`) into one
+    command. If `dbt run` fails, exits with the same code WITHOUT running
+    scherlok -- the manifest is stale or partial and watching it would
+    surface noise instead of signal.
+
+    Requires the `dbt` binary on PATH. dbt-core is not a hard dependency
+    of scherlok; install it (or the appropriate dbt adapter) separately.
+
+    Example:
+        scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
+    """
+    dbt_bin = shutil.which("dbt")
+    if dbt_bin is None:
+        out_error(
+            "[red]`dbt` binary not found on PATH. Install dbt-core (or your adapter) "
+            "and re-run.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    cmd: list[str] = [dbt_bin, "run", "--project-dir", project_dir]
+    if profiles_dir:
+        cmd.extend(["--profiles-dir", profiles_dir])
+    if target:
+        cmd.extend(["--target", target])
+    for s in select or []:
+        cmd.extend(["--select", s])
+
+    out_info(f"[bold]Running:[/bold] {' '.join(cmd)}")
+    # Stream stdout live so long dbt runs surface progress in CI logs.
+    # We don't capture output -- piping it through scherlok would buffer it.
+    completed = subprocess.run(cmd, check=False)
+    if completed.returncode != 0:
+        out_error(
+            f"[red]`dbt run` failed with exit code {completed.returncode}. "
+            f"Skipping scherlok watch (manifest may be stale).[/red]"
+        )
+        raise typer.Exit(code=completed.returncode)
+
+    out_info("[green]dbt run succeeded.[/green] Profiling materialized models...")
+    # Call the implementation function (not the Typer-decorated `dbt`) so the
+    # parameter defaults resolve to actual values instead of `OptionInfo`
+    # sentinels. Pass every kwarg explicitly; `_dbt_impl` is keyword-only.
+    _dbt_impl(
+        project_dir=project_dir,
+        profiles_dir=profiles_dir,
+        target=target,
+        connection_string=connection_string,
+        select=select,
+        include_sources=include_sources,
+        include_snapshots=include_snapshots,
+        webhook=webhook,
+        email=email or None,
+        fail_on=fail_on,
+        json_mode=False,
+    )
 
 
 def _resolve_physical_table(node: object, visible: set[str]) -> str | None:

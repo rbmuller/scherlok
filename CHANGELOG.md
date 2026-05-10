@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`scherlok dbt --include-snapshots`** — opt-in flag to also profile dbt snapshot nodes. Snapshots are SCD Type 2 tables that physically exist in the warehouse and are profilable like any other materialized model; they were skipped in v0 because `discover_models` filtered to `resource_type == "model"`. When the flag is unset, behavior is unchanged. ([#22](https://github.com/rbmuller/scherlok/issues/22))
+- **`scherlok dbt-run-and-watch`** — wraps the typical CI sequence (`dbt run` -> `scherlok dbt`) into one invocation. Streams `dbt run` output live; if `dbt run` fails, exits with the same code WITHOUT running scherlok against a stale or partial manifest. Passes `--target`, `--profiles-dir`, and `--select` through to `dbt run`. Requires the `dbt` binary on PATH (dbt-core remains an opt-in dependency). ([#34](https://github.com/rbmuller/scherlok/issues/34))
 
 ## [0.5.0] — 2026-04-30
 
