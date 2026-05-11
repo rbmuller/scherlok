@@ -1,5 +1,6 @@
 """Tests for `scherlok dbt` CLI command."""
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -129,3 +130,108 @@ def test_dbt_select_filters_models(mock_get_connector, tmp_path, monkeypatch):
     # Exactly fct_orders profiled
     called_table = mock_watch.call_args.args[2]
     assert called_table == "fct_orders"
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_output_json_emits_parseable_object(mock_get_connector, tmp_path, monkeypatch):
+    """`--output json` emits a single JSON object on stdout with the documented shape."""
+    from scherlok.detector.severity import Severity
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake
+
+    sample_anomaly = {
+        "table": "stg_customers",
+        "severity": Severity.CRITICAL,
+        "type": "volume_drop",
+        "message": "row count fell 90%",
+    }
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        # First model carries an anomaly so summary counts non-zero criticals.
+        mock_watch.side_effect = [
+            ([sample_anomaly], {"row_count": 4}),
+            ([], {"row_count": 100}),
+            ([], {"row_count": 200}),
+            ([], {"row_count": 300}),
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@host/db",
+                "--output", "json",
+            ],
+        )
+
+    # Default --fail-on=critical exits 1 on the CRITICAL anomaly; the JSON
+    # must still have landed on stdout before that exit.
+    assert result.stdout.strip().startswith("{"), f"stdout not json: {result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert payload["project_dir"] == str(PG_PROJECT)
+    assert payload["adapter"] == "postgres"
+    assert isinstance(payload["models"], list)
+    assert len(payload["models"]) == 4
+    first = payload["models"][0]
+    assert set(first.keys()) >= {"name", "physical", "resource_type", "row_count", "anomalies"}
+    assert first["anomalies"][0]["severity"] == "CRITICAL"
+    assert first["anomalies"][0]["type"] == "volume_drop"
+    summary = payload["summary"]
+    assert set(summary.keys()) >= {"profiled", "anomalies", "critical", "warning"}
+    assert summary["profiled"] == 4
+    assert summary["anomalies"] == 1
+    assert summary["critical"] == 1
+    assert summary["warning"] == 0
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_output_json_keeps_stdout_clean(mock_get_connector, tmp_path, monkeypatch):
+    """No Rich `Investigating ...` or `Summary:` chatter leaks into stdout when --output json."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake
+
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.return_value = ([], {"row_count": 1})
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@host/db",
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Investigating" not in result.stdout
+    assert "Summary:" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["anomalies"] == 0
+
+
+def test_dbt_output_invalid_value_rejected(tmp_path, monkeypatch):
+    """Unknown --output values exit 1 with a clear message."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    result = runner.invoke(
+        app,
+        [
+            "dbt",
+            "--project-dir", str(PG_PROJECT),
+            "--connection-string", "postgresql://u:p@host/db",
+            "--output", "yaml",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Invalid --output" in result.output
