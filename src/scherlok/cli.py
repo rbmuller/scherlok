@@ -1,5 +1,6 @@
 """CLI entry point for Scherlok. Built with Typer and Rich."""
 
+import json
 import time
 from pathlib import Path
 
@@ -427,6 +428,10 @@ def dbt(
         "critical", "--fail-on",
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
+    output: str = typer.Option(
+        "text", "--output",
+        help="Output format: 'text' (default) or 'json' for CI parsers",
+    ),
 ) -> None:
     """Profile and watch dbt models. Reads target/manifest.json.
 
@@ -437,7 +442,68 @@ def dbt(
         scherlok dbt --project-dir ./my_dbt_project
         scherlok dbt --project-dir . --select stg_orders --select fct_orders
         scherlok dbt --project-dir . --connection-string postgresql://...
+        scherlok dbt --project-dir . --output json  # CI-parseable stdout
     """
+    output_lower = output.lower()
+    if output_lower not in ("text", "json"):
+        console.print(
+            f"[red]Invalid --output value '{output}'. Use 'text' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=1)
+    json_mode = output_lower == "json"
+
+    from scherlok.output import is_quiet, set_stderr, set_verbosity
+    prev_quiet = is_quiet()
+    if json_mode:
+        # Reroute Rich chatter to stderr so stdout stays exclusively for the
+        # JSON payload emitted at the end of this command. The module-level
+        # console is shared, so the restore in the finally block below is
+        # what keeps subsequent commands (and subsequent tests) untouched.
+        set_stderr(True)
+        # _dispatch_alerts gates its Rich anomaly-table print on is_quiet();
+        # flip that on for the duration of the json run so the table never
+        # appears on stderr alongside the JSON payload either.
+        set_verbosity(quiet=True)
+
+    try:
+        _dbt_impl(
+            project_dir=project_dir,
+            profiles_dir=profiles_dir,
+            target=target,
+            connection_string=connection_string,
+            select=select,
+            include_sources=include_sources,
+            include_snapshots=include_snapshots,
+            webhook=webhook,
+            email=email,
+            fail_on=fail_on,
+            json_mode=json_mode,
+        )
+    finally:
+        if json_mode:
+            set_stderr(False)
+            set_verbosity(quiet=prev_quiet)
+
+
+def _dbt_impl(
+    *,
+    project_dir: str,
+    profiles_dir: str | None,
+    target: str | None,
+    connection_string: str | None,
+    select: list[str] | None,
+    include_sources: bool,
+    include_snapshots: bool,
+    webhook: str | None,
+    email: list[str] | None,
+    fail_on: str,
+    json_mode: bool,
+) -> None:
+    """The actual dbt-command body. Extracted so the `dbt()` entry point can
+    wrap it in a try/finally that restores the shared output console after
+    JSON-mode rerouting -- the entry point keeps the Typer surface and the
+    flag parsing; this function does the work."""
+
     from scherlok.dbt import (
         DbtNode,
         ProfileResolutionError,
@@ -517,22 +583,40 @@ def dbt(
     # 4. Per-model investigate + watch
     from scherlok.config import PROFILES_DB
     all_anomalies: list[dict] = []
+    json_models: list[dict] = []
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = ProfileStore()
         for node, physical in matched:
             table_anomalies, current_vol = _watch_table(connector, store, physical)
             all_anomalies.extend(table_anomalies)
-            _print_dbt_model_result(node, physical, current_vol, table_anomalies)
+            if json_mode:
+                json_models.append(_dbt_model_payload(node, physical, current_vol, table_anomalies))
+            else:
+                _print_dbt_model_result(node, physical, current_vol, table_anomalies)
         _dispatch_alerts(all_anomalies, store, webhook, email or None)
 
     # 5. Summary + exit code
     crit = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("CRITICAL"))
     warn = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("WARNING"))
-    out_info(
-        f"\n[bold]Summary:[/bold] {len(matched)} profiled, "
-        f"{len(all_anomalies)} anomalies "
-        f"([red]{crit} critical[/red], [yellow]{warn} warning[/yellow])"
-    )
+    if json_mode:
+        payload = {
+            "project_dir": project_dir,
+            "adapter": adapter,
+            "models": json_models,
+            "summary": {
+                "profiled": len(matched),
+                "anomalies": len(all_anomalies),
+                "critical": crit,
+                "warning": warn,
+            },
+        }
+        print(json.dumps(payload))
+    else:
+        out_info(
+            f"\n[bold]Summary:[/bold] {len(matched)} profiled, "
+            f"{len(all_anomalies)} anomalies "
+            f"([red]{crit} critical[/red], [yellow]{warn} warning[/yellow])"
+        )
 
     fail_on_lower = fail_on.lower()
     if fail_on_lower == "warning":
@@ -558,6 +642,31 @@ def _resolve_physical_table(node: object, visible: set[str]) -> str | None:
         if cand and cand in visible:
             return cand
     return None
+
+
+def _dbt_model_payload(
+    node: object, physical: str, current_vol: dict, anomalies: list[dict]
+) -> dict:
+    """Serialize one dbt model's profile + anomalies for `--output json`.
+
+    Enum severities serialize as their bare name (e.g. `"CRITICAL"` rather
+    than `"Severity.CRITICAL"`) so the JSON contract is stable regardless
+    of how the detector module spells the value.
+    """
+    return {
+        "name": node.name,  # type: ignore[attr-defined]
+        "physical": physical,
+        "resource_type": getattr(node, "resource_type", "model"),
+        "row_count": current_vol.get("row_count"),
+        "anomalies": [
+            {
+                "severity": str(a.get("severity")).rsplit(".", 1)[-1],
+                "type": a.get("type"),
+                "message": a.get("message"),
+            }
+            for a in anomalies
+        ],
+    }
 
 
 def _print_dbt_model_result(
