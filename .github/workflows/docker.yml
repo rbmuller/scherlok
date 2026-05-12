@@ -15,6 +15,13 @@ on:
 permissions:
   contents: read
 
+# Catch dependency bloat early: if a new transitive dep silently doubles the
+# image, fail the publish before a release tag goes out. The current image
+# (python:3.12-slim + scherlok wheel + warehouse extras) sits ~85-95 MiB, so
+# 100 MiB is a small headroom and not a stretch target.
+env:
+  MAX_IMAGE_SIZE_BYTES: 104857600
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -57,6 +64,28 @@ jobs:
             org.opencontainers.image.version=${{ steps.tags.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Assert image size under ceiling (linux/amd64)
+        env:
+          IMAGE_REF: ghcr.io/rbmuller/scherlok:${{ steps.tags.outputs.version }}
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect "$IMAGE_REF" --raw \
+            | jq -r '.manifests[] | select(.platform.architecture == "amd64" and .platform.os == "linux") | .digest')
+          if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+            echo "::error::Could not resolve linux/amd64 manifest for $IMAGE_REF"
+            exit 1
+          fi
+          repo="${IMAGE_REF%:*}"
+          size_bytes=$(docker buildx imagetools inspect "${repo}@${digest}" --raw \
+            | jq '[.layers[].size] | add')
+          size_mib=$(( size_bytes / 1024 / 1024 ))
+          max_mib=$(( MAX_IMAGE_SIZE_BYTES / 1024 / 1024 ))
+          echo "linux/amd64 compressed image size: ${size_mib} MiB (ceiling ${max_mib} MiB)"
+          if [ "$size_bytes" -gt "$MAX_IMAGE_SIZE_BYTES" ]; then
+            echo "::error::Image size ${size_mib} MiB exceeds the ${max_mib} MiB ceiling. Investigate dependency bloat before merging."
+            exit 1
+          fi
 
       - name: Smoke-test image
         run: |
