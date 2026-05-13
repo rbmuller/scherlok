@@ -1,10 +1,17 @@
 """Tests for the Scherlok CLI."""
 
+import re
+
 from typer.testing import CliRunner
 
 from scherlok.cli import app
 
 runner = CliRunner(env={"NO_COLOR": "1"})
+
+# Rich emits bold/dim styling via ANSI even when NO_COLOR strips colors, and
+# CI runners typically have TERM=xterm so terminal-detection keeps styling on.
+# Strip before substring assertions on help output.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def test_version_command():
@@ -111,8 +118,8 @@ def test_check_help():
 
 def test_check_and_ci_share_options():
     """Test that check and ci expose the same CI options."""
-    ci_help = runner.invoke(app, ["ci", "--help"]).output
-    check_help = runner.invoke(app, ["check", "--help"]).output
+    ci_help = ANSI_RE.sub("", runner.invoke(app, ["ci", "--help"]).output)
+    check_help = ANSI_RE.sub("", runner.invoke(app, ["check", "--help"]).output)
 
     for option in ["--fail-on", "--webhook", "--email"]:
         assert option in ci_help
