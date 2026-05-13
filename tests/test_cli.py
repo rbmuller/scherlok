@@ -4,7 +4,7 @@ from typer.testing import CliRunner
 
 from scherlok.cli import app
 
-runner = CliRunner()
+runner = CliRunner(env={"NO_COLOR": "1"})
 
 
 def test_version_command():
