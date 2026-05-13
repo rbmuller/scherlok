@@ -337,6 +337,37 @@ def watch(
     raise typer.Exit(code=exit_code_for(anomalies))
 
 
+def _run_ci(
+    connection_string: str,
+    webhook: str | None,
+    email: list[str] | None,
+    fail_on: str,
+) -> None:
+    # Save connection
+    cfg = ScherlokConfig.load()
+    cfg.connection_string = connection_string
+    cfg.save()
+
+    # Validate connection
+    connector = get_connector(connection_string)
+    if not connector.connect():
+        _print_connect_failure(connector)
+        raise typer.Exit(code=1)
+
+    # Run watch (does profile + detect + alert in one)
+    anomalies = _run_watch(webhook=webhook, emails=email or None)
+
+    # Custom exit code based on --fail-on
+    fail_on_lower = fail_on.lower()
+    if fail_on_lower == "warning":
+        from scherlok.detector.severity import Severity
+        if any(a["severity"] in (Severity.WARNING, Severity.CRITICAL) for a in anomalies):
+            raise typer.Exit(code=1)
+    else:  # critical (default)
+        if exit_code_for(anomalies) == 1:
+            raise typer.Exit(code=1)
+
+
 @app.command()
 def ci(
     connection_string: str = typer.Argument(
@@ -365,29 +396,27 @@ def ci(
             scherlok config --store s3://my-bucket/scherlok/profiles.db
             scherlok ci $DATABASE_URL --webhook $SLACK_URL --fail-on critical
     """
-    # Save connection
-    cfg = ScherlokConfig.load()
-    cfg.connection_string = connection_string
-    cfg.save()
+    _run_ci(connection_string, webhook, email, fail_on)
 
-    # Validate connection
-    connector = get_connector(connection_string)
-    if not connector.connect():
-        _print_connect_failure(connector)
-        raise typer.Exit(code=1)
 
-    # Run watch (does profile + detect + alert in one)
-    anomalies = _run_watch(webhook=webhook, emails=email or None)
-
-    # Custom exit code based on --fail-on
-    fail_on_lower = fail_on.lower()
-    if fail_on_lower == "warning":
-        from scherlok.detector.severity import Severity
-        if any(a["severity"] in (Severity.WARNING, Severity.CRITICAL) for a in anomalies):
-            raise typer.Exit(code=1)
-    else:  # critical (default)
-        if exit_code_for(anomalies) == 1:
-            raise typer.Exit(code=1)
+@app.command()
+def check(
+    connection_string: str = typer.Argument(
+        ..., help="Database connection string"
+    ),
+    webhook: str = typer.Option(
+        None, "--webhook", "-w", help="Webhook URL for alerts"
+    ),
+    email: list[str] = typer.Option(
+        None, "--email", "-e", help="Email recipient(s) for alerts"
+    ),
+    fail_on: str = typer.Option(
+        "critical", "--fail-on",
+        help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
+    ),
+) -> None:
+    """Assertion-only CI alias for `scherlok ci --fail-on critical`."""
+    _run_ci(connection_string, webhook, email, fail_on)
 
 
 @app.command()
