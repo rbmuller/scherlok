@@ -1,12 +1,10 @@
 """Tests for MySQLConnector — all I/O mocked, no real MySQL needed."""
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
 import sys
-import types
+from datetime import datetime
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Patch pymysql before the connector module is imported

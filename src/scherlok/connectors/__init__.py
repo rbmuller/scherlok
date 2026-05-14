@@ -24,7 +24,7 @@ try:
     from scherlok.connectors.mysql import MySQLConnector
     CONNECTOR_SCHEMES["mysql"] = MySQLConnector
 except ImportError:
-    pass 
+    pass
 
 def get_connector(connection_string: str) -> BaseConnector:
     """Return the appropriate connector for a given connection string.

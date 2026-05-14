@@ -112,7 +112,7 @@ class MySQLConnector(BaseConnector):
         stats: dict[str, Any] = {}
         with self._cursor() as cur:
             cur.execute(
-                f"SELECT "  
+                f"SELECT "
                 f"  SUM(CASE WHEN `{column}` IS NULL THEN 1 ELSE 0 END) AS null_count, "
                 f"  COUNT(DISTINCT `{column}`) AS distinct_count "
                 f"FROM `{table}`"
@@ -121,10 +121,10 @@ class MySQLConnector(BaseConnector):
             stats["null_count"] = int(row["null_count"] or 0)
             stats["distinct_count"] = int(row["distinct_count"] or 0)
 
-         
+
             try:
                 cur.execute(
-                    f"SELECT " 
+                    f"SELECT "
                     f"  AVG(`{column}`) AS mean, "
                     f"  STDDEV(`{column}`) AS stddev, "
                     f"  MIN(`{column}`) AS min, "
@@ -132,8 +132,10 @@ class MySQLConnector(BaseConnector):
                     f"FROM `{table}`"
                 )
                 num_row = cur.fetchone()
-                stats["mean"] = float(num_row["mean"]) if num_row["mean"] is not None else None
-                stats["stddev"] = float(num_row["stddev"]) if num_row["stddev"] is not None else None
+                mean = num_row["mean"]
+                stddev = num_row["stddev"]
+                stats["mean"] = float(mean) if mean is not None else None
+                stats["stddev"] = float(stddev) if stddev is not None else None
                 stats["min"] = str(num_row["min"]) if num_row["min"] is not None else None
                 stats["max"] = str(num_row["max"]) if num_row["max"] is not None else None
             except pymysql.Error:
