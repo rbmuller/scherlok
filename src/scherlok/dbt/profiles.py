@@ -1,6 +1,6 @@
 """Resolve a Scherlok connection string from a dbt project's profiles.yml.
 
-Supports the three adapters Scherlok already speaks: postgres, bigquery, snowflake.
+Supports the four adapters Scherlok already speaks: postgres, bigquery, snowflake, mysql.
 Renders only `{{ env_var('FOO') }}` / `{{ env_var('FOO', 'default') }}` — anything
 else (full Jinja, secrets:// resolvers, etc.) raises and asks the user to pass
 --connection-string explicitly.
@@ -135,10 +135,12 @@ def _output_to_connection_string(output: dict) -> str:
         return _bigquery_connection_string(output)
     if adapter_type == "snowflake":
         return _snowflake_connection_string(output)
+    if adapter_type == "mysql":
+        return _mysql_connection_string(output)
 
     raise ProfileResolutionError(
         f"Unsupported dbt adapter '{adapter_type}'. "
-        f"Supported: postgres, bigquery, snowflake. "
+        f"Supported: postgres, bigquery, snowflake, mysql. "
         f"Use --connection-string to bypass profiles.yml."
     )
 
@@ -176,3 +178,17 @@ def _snowflake_connection_string(output: dict) -> str:
             "Snowflake profile missing required fields: account, database, schema."
         )
     return f"snowflake://{account}/{database}/{schema}"
+
+
+def _mysql_connection_string(output: dict) -> str:
+    user = output.get("user") or output.get("username", "")
+    password = output.get("password", "")
+    host = output.get("host") or output.get("server", "localhost")
+    port = output.get("port", 3306)
+    database = output.get("database") or output.get("schema", "")
+    if not user or not database:
+        raise ProfileResolutionError(
+            "MySQL profile missing required fields: user, database."
+        )
+    auth = f"{user}:{password}@" if password else f"{user}@"
+    return f"mysql://{auth}{host}:{port}/{database}"

@@ -93,7 +93,7 @@ Use it as a CI gate after `dbt run`:
 - run: scherlok dbt --project-dir . --target prod --fail-on critical
 ```
 
-**Supported adapters:** `postgres`, `bigquery`, `snowflake`. For others, pass `--connection-string` explicitly.
+**Supported adapters:** `postgres`, `bigquery`, `snowflake`, `mysql`. For others, pass `--connection-string` explicitly.
 
 📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
 
@@ -204,6 +204,10 @@ export SNOWFLAKE_USER=...
 export SNOWFLAKE_PASSWORD=...
 export SNOWFLAKE_WAREHOUSE=...
 scherlok connect snowflake://account/database/schema
+
+# MySQL
+pip install scherlok[mysql]
+scherlok connect mysql://user:pass@host:3306/dbname
 ```
 
 | Database | Status |
@@ -211,7 +215,7 @@ scherlok connect snowflake://account/database/schema
 | PostgreSQL | Available |
 | BigQuery | Available |
 | Snowflake | Available |
-| MySQL | Coming soon |
+| MySQL | Available |
 | DuckDB | Planned |
 
 ## Remote Storage

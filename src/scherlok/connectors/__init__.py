@@ -20,7 +20,11 @@ try:
     CONNECTOR_SCHEMES["snowflake"] = SnowflakeConnector
 except ImportError:
     pass  # snowflake-connector-python not installed
-
+try:
+    from scherlok.connectors.mysql import MySQLConnector
+    CONNECTOR_SCHEMES["mysql"] = MySQLConnector
+except ImportError:
+    pass
 
 def get_connector(connection_string: str) -> BaseConnector:
     """Return the appropriate connector for a given connection string.

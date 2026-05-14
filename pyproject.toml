@@ -36,6 +36,9 @@ bigquery = [
 snowflake = [
     "snowflake-connector-python>=3.0.0",
 ]
+mysql = [
+    "pymysql>=1.1",
+]
 dbt = [
     "pyyaml>=6.0",
 ]
