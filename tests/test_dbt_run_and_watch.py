@@ -1,5 +1,6 @@
 """Tests for `scherlok dbt-run-and-watch` CLI command."""
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,15 +12,19 @@ runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "dbt"
 PG_PROJECT = FIXTURES / "jaffle_shop_postgres"
 
+# CI terminals emit ANSI styling (bold/dim) even when colors are disabled;
+# strip them before substring assertions on Rich-rendered help text.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
 
 def test_dbt_run_and_watch_help():
     result = runner.invoke(app, ["dbt-run-and-watch", "--help"])
     assert result.exit_code == 0
-    # Help output gets wrapped to terminal width by Rich; normalize whitespace
-    # before checking the contract sentence.
-    output_normalized = " ".join(result.output.split())
-    assert "Run `dbt run`" in output_normalized
-    assert "exits with the same code WITHOUT running scherlok" in output_normalized
+    # Rich wraps to terminal width and injects ANSI between words; strip ANSI
+    # then collapse whitespace before checking the contract sentences.
+    output_clean = " ".join(ANSI_RE.sub("", result.output).split())
+    assert "Run `dbt run`" in output_clean
+    assert "exits with the same code WITHOUT running scherlok" in output_clean
 
 
 def test_dbt_run_and_watch_missing_dbt_binary():
