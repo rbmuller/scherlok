@@ -74,12 +74,24 @@ Add Scherlok as a gate after `dbt run`:
 
 `--fail-on critical` exits with code 1 when any CRITICAL anomaly is detected; `--fail-on warning` is stricter and fails on WARNING+ as well.
 
-## What's coming next (Month 5)
+For CI parsers, pass `--output json` to emit a single JSON document on stdout (status + per-model anomalies) instead of the human-readable text.
+
+### One-shot wrapper: `scherlok dbt-run-and-watch`
+
+If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one invocation:
+
+```yaml
+- run: |
+    pip install scherlok[dbt]
+    scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
+```
+
+The wrapper streams `dbt run` output live. If `dbt run` exits non-zero, the wrapper propagates the exit code and skips the watch (a stale or partial manifest would surface noise, not signal). `--project-dir`, `--target`, `--profiles-dir`, and `--select` are forwarded to `dbt run`; everything else stays scherlok-only.
+
+## What's coming next
 
 - GitHub Action wrapper (`uses: rbmuller/scherlok-action@v1`)
-- `scherlok dbt run-and-watch` — runs `dbt run` and `scherlok dbt` in sequence
 - ASCII lineage tree from `manifest.parent_map` / `child_map`
-- JSON output for CI (`--output json`)
 
 ## Limitations of v0
 
