@@ -93,6 +93,12 @@ Use it as a CI gate after `dbt run`:
 - run: scherlok dbt --project-dir . --target prod --fail-on critical
 ```
 
+Or collapse both steps into one with the wrapper:
+
+```yaml
+- run: scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
+```
+
 **Supported adapters:** `postgres`, `bigquery`, `snowflake`, `mysql`. For others, pass `--connection-string` explicitly.
 
 📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
