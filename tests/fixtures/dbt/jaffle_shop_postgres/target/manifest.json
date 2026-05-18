@@ -13,9 +13,15 @@
       "alias": "stg_customers",
       "database": "jaffle_db",
       "schema": "public",
-      "fqn": ["jaffle_shop", "staging", "stg_customers"],
+      "fqn": [
+        "jaffle_shop",
+        "staging",
+        "stg_customers"
+      ],
       "relation_name": "\"jaffle_db\".\"public\".\"stg_customers\"",
-      "config": {"materialized": "view"}
+      "config": {
+        "materialized": "view"
+      }
     },
     "model.jaffle_shop.stg_orders": {
       "resource_type": "model",
@@ -23,9 +29,15 @@
       "alias": "stg_orders",
       "database": "jaffle_db",
       "schema": "public",
-      "fqn": ["jaffle_shop", "staging", "stg_orders"],
+      "fqn": [
+        "jaffle_shop",
+        "staging",
+        "stg_orders"
+      ],
       "relation_name": "\"jaffle_db\".\"public\".\"stg_orders\"",
-      "config": {"materialized": "view"}
+      "config": {
+        "materialized": "view"
+      }
     },
     "model.jaffle_shop.fct_orders": {
       "resource_type": "model",
@@ -33,9 +45,15 @@
       "alias": "fct_orders",
       "database": "jaffle_db",
       "schema": "public",
-      "fqn": ["jaffle_shop", "marts", "fct_orders"],
+      "fqn": [
+        "jaffle_shop",
+        "marts",
+        "fct_orders"
+      ],
       "relation_name": "\"jaffle_db\".\"public\".\"fct_orders\"",
-      "config": {"materialized": "table"}
+      "config": {
+        "materialized": "table"
+      }
     },
     "model.jaffle_shop.int_orders_pivoted": {
       "resource_type": "model",
@@ -43,9 +61,15 @@
       "alias": "int_orders_pivoted",
       "database": "jaffle_db",
       "schema": "public",
-      "fqn": ["jaffle_shop", "intermediate", "int_orders_pivoted"],
+      "fqn": [
+        "jaffle_shop",
+        "intermediate",
+        "int_orders_pivoted"
+      ],
       "relation_name": null,
-      "config": {"materialized": "ephemeral"}
+      "config": {
+        "materialized": "ephemeral"
+      }
     },
     "model.jaffle_shop.dim_customers_inc": {
       "resource_type": "model",
@@ -53,9 +77,15 @@
       "alias": "dim_customers_inc",
       "database": "jaffle_db",
       "schema": "public",
-      "fqn": ["jaffle_shop", "marts", "dim_customers_inc"],
+      "fqn": [
+        "jaffle_shop",
+        "marts",
+        "dim_customers_inc"
+      ],
       "relation_name": "\"jaffle_db\".\"public\".\"dim_customers_inc\"",
-      "config": {"materialized": "incremental"}
+      "config": {
+        "materialized": "incremental"
+      }
     },
     "test.jaffle_shop.unique_stg_customers_id.abc123": {
       "resource_type": "test",
@@ -65,7 +95,9 @@
     "seed.jaffle_shop.raw_customers": {
       "resource_type": "seed",
       "name": "raw_customers",
-      "config": {"materialized": "seed"}
+      "config": {
+        "materialized": "seed"
+      }
     }
   },
   "sources": {
@@ -77,5 +109,50 @@
       "schema": "raw",
       "relation_name": "\"jaffle_db\".\"raw\".\"raw_payments\""
     }
+  },
+  "parent_map": {
+    "model.jaffle_shop.stg_customers": [
+      "seed.jaffle_shop.raw_customers"
+    ],
+    "model.jaffle_shop.stg_orders": [
+      "source.jaffle_shop.raw.payments"
+    ],
+    "model.jaffle_shop.int_orders_pivoted": [
+      "model.jaffle_shop.stg_orders"
+    ],
+    "model.jaffle_shop.fct_orders": [
+      "model.jaffle_shop.int_orders_pivoted",
+      "model.jaffle_shop.stg_customers"
+    ],
+    "model.jaffle_shop.dim_customers_inc": [
+      "model.jaffle_shop.stg_customers"
+    ],
+    "test.jaffle_shop.unique_stg_customers_id.abc123": [
+      "model.jaffle_shop.stg_customers"
+    ],
+    "seed.jaffle_shop.raw_customers": [],
+    "source.jaffle_shop.raw.payments": []
+  },
+  "child_map": {
+    "model.jaffle_shop.stg_customers": [
+      "model.jaffle_shop.fct_orders",
+      "model.jaffle_shop.dim_customers_inc",
+      "test.jaffle_shop.unique_stg_customers_id.abc123"
+    ],
+    "model.jaffle_shop.stg_orders": [
+      "model.jaffle_shop.int_orders_pivoted"
+    ],
+    "model.jaffle_shop.int_orders_pivoted": [
+      "model.jaffle_shop.fct_orders"
+    ],
+    "model.jaffle_shop.fct_orders": [],
+    "model.jaffle_shop.dim_customers_inc": [],
+    "test.jaffle_shop.unique_stg_customers_id.abc123": [],
+    "seed.jaffle_shop.raw_customers": [
+      "model.jaffle_shop.stg_customers"
+    ],
+    "source.jaffle_shop.raw.payments": [
+      "model.jaffle_shop.stg_orders"
+    ]
   }
 }

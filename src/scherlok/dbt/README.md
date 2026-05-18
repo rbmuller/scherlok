@@ -88,10 +88,38 @@ If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one in
 
 The wrapper streams `dbt run` output live. If `dbt run` exits non-zero, the wrapper propagates the exit code and skips the watch (a stale or partial manifest would surface noise, not signal). `--project-dir`, `--target`, `--profiles-dir`, and `--select` are forwarded to `dbt run`; everything else stays scherlok-only.
 
+## Lineage and downstream impact
+
+Scherlok reads `parent_map` from `manifest.json` to know each model's place in the DAG. Two features use it:
+
+```bash
+scherlok dbt --project-dir . --show-lineage
+```
+
+prints an ASCII tree of upstream + downstream models under each profiled model's ✓/✗ line:
+
+```
+  ✓ stg_customers                  (12,345 rows)
+    Upstream of stg_customers:
+      stg_customers
+      └── raw_customers
+    Downstream of stg_customers:
+      stg_customers
+      ├── fct_orders
+      └── dim_customers_inc
+```
+
+When an anomaly fires, the message is enriched with downstream impact so the alerter payload tells on-call which marts are about to drift:
+
+```
+✗ stg_customers  CRITICAL: Row count dropped 60.0% (1000 → 400) · Affects 2 downstream models: fct_orders, dim_customers_inc
+```
+
+Leaf marts (no descendants) get no suffix.
+
 ## What's coming next
 
 - GitHub Action wrapper (`uses: rbmuller/scherlok-action@v1`)
-- ASCII lineage tree from `manifest.parent_map` / `child_map`
 
 ## Limitations of v0
 

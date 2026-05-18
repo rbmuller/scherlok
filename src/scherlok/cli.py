@@ -463,6 +463,11 @@ def dbt(
         "text", "--output",
         help="Output format: 'text' (default) or 'json' for CI parsers",
     ),
+    show_lineage: bool = typer.Option(
+        False, "--show-lineage",
+        help="After each model's result, print an ASCII tree of its upstream "
+        "and downstream models from manifest.json.",
+    ),
 ) -> None:
     """Profile and watch dbt models. Reads target/manifest.json.
 
@@ -474,6 +479,7 @@ def dbt(
         scherlok dbt --project-dir . --select stg_orders --select fct_orders
         scherlok dbt --project-dir . --connection-string postgresql://...
         scherlok dbt --project-dir . --output json  # CI-parseable stdout
+        scherlok dbt --project-dir . --show-lineage  # render lineage trees
     """
     output_lower = output.lower()
     if output_lower not in ("text", "json"):
@@ -509,6 +515,7 @@ def dbt(
             email=email,
             fail_on=fail_on,
             json_mode=json_mode,
+            show_lineage=show_lineage,
         )
     finally:
         if json_mode:
@@ -529,6 +536,7 @@ def _dbt_impl(
     email: list[str] | None,
     fail_on: str,
     json_mode: bool,
+    show_lineage: bool = False,
 ) -> None:
     """The actual dbt-command body. Extracted so the `dbt()` entry point can
     wrap it in a try/finally that restores the shared output console after
@@ -538,6 +546,7 @@ def _dbt_impl(
     from scherlok.dbt import (
         DbtNode,
         ProfileResolutionError,
+        build_dependency_graph,
         discover_models,
         discover_sources,
         load_manifest,
@@ -611,7 +620,10 @@ def _dbt_impl(
             f"{' …' if len(missing) > 5 else ''}[/yellow]"
         )
 
-    # 4. Per-model investigate + watch
+    # 4. Build lineage graph once for downstream enrichment + --show-lineage
+    lineage_graph = build_dependency_graph(manifest)
+
+    # 5. Per-model investigate + watch
     from scherlok.config import PROFILES_DB
     all_anomalies: list[dict] = []
     json_models: list[dict] = []
@@ -619,11 +631,17 @@ def _dbt_impl(
         store = ProfileStore()
         for node, physical in matched:
             table_anomalies, current_vol = _watch_table(connector, store, physical)
+            # Enrich each anomaly's message with downstream-impact info so the
+            # downstream context follows the anomaly through prints, JSON, and
+            # alerter payloads alike.
+            _enrich_anomalies_with_lineage(table_anomalies, node.unique_id, lineage_graph)
             all_anomalies.extend(table_anomalies)
             if json_mode:
                 json_models.append(_dbt_model_payload(node, physical, current_vol, table_anomalies))
             else:
                 _print_dbt_model_result(node, physical, current_vol, table_anomalies)
+                if show_lineage:
+                    _print_lineage_block(lineage_graph, node.unique_id)
         _dispatch_alerts(all_anomalies, store, webhook, email or None)
 
     # 5. Summary + exit code
@@ -702,6 +720,11 @@ def dbt_run_and_watch(
         "critical", "--fail-on",
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
+    show_lineage: bool = typer.Option(
+        False, "--show-lineage",
+        help="After each model's result, print an ASCII tree of its upstream "
+        "and downstream models from manifest.json.",
+    ),
 ) -> None:
     """Run `dbt run` then immediately profile the freshly built models.
 
@@ -759,6 +782,7 @@ def dbt_run_and_watch(
         email=email or None,
         fail_on=fail_on,
         json_mode=False,
+        show_lineage=show_lineage,
     )
 
 
@@ -819,6 +843,45 @@ def _print_dbt_model_result(
     color = "red" if worst == "CRITICAL" else "yellow"
     msg = anomalies[0].get("message", "anomaly detected")
     out_error(f"  [{color}]✗[/{color}] {name:<30} {worst}: {msg}")
+
+
+def _enrich_anomalies_with_lineage(
+    anomalies: list[dict], unique_id: str, graph: dict[str, list[str]]
+) -> None:
+    """Append a downstream-impact note to each anomaly's message in place.
+
+    The note quotes up to 3 downstream model names plus an overflow count
+    so the alerter payload stays readable while still hinting at scale.
+    No-op when the node has no downstream consumers — callers won't be
+    flooded with `Affects 0 downstream models` lines on leaf marts.
+    """
+    from scherlok.dbt import display_name as _display_name
+    from scherlok.dbt import downstream_of as _downstream_of
+
+    downstream = _downstream_of(graph, unique_id)
+    if not downstream:
+        return
+    names = [_display_name(uid) for uid in downstream]
+    preview = ", ".join(names[:3])
+    overflow = f" (+{len(names) - 3} more)" if len(names) > 3 else ""
+    plural = "s" if len(names) != 1 else ""
+    suffix = (
+        f" · Affects {len(names)} downstream model{plural}: {preview}{overflow}"
+    )
+    for a in anomalies:
+        msg = a.get("message", "")
+        a["message"] = f"{msg}{suffix}"
+
+
+def _print_lineage_block(graph: dict[str, list[str]], unique_id: str) -> None:
+    """Print the ASCII lineage tree for one model, indented to align under ✓/✗."""
+    from scherlok.dbt import render_lineage_tree as _render
+
+    tree = _render(graph, unique_id)
+    if not tree:
+        return
+    for line in tree.splitlines():
+        out_info(f"    {line}")
 
 
 @app.command()
