@@ -125,6 +125,5 @@ Leaf marts (no descendants) get no suffix.
 
 - No support for ephemeral models (they're not materialized — nothing to profile).
 - No support for adapter-specific Jinja in `profiles.yml` beyond `env_var`.
-- Lineage is **not yet** read from the manifest — anomalies are reported per-model with no downstream impact.
 
 If you hit one of these, please open an issue.

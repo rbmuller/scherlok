@@ -28,20 +28,10 @@ def build_dependency_graph(manifest: dict) -> dict[str, list[str]]:
 def upstream_of(graph: dict[str, list[str]], unique_id: str) -> list[str]:
     """Transitive closure of ancestors. BFS, deterministic per parent order.
 
-    Excludes ``unique_id`` itself. Returns ``[]`` when the node is unknown
-    or has no parents.
+    Excludes ``unique_id`` itself even in graphs that contain a cycle back
+    through it. Returns ``[]`` when the node is unknown or has no parents.
     """
-    seen: set[str] = set()
-    out: list[str] = []
-    q = deque(graph.get(unique_id, []))
-    while q:
-        nid = q.popleft()
-        if nid in seen:
-            continue
-        seen.add(nid)
-        out.append(nid)
-        q.extend(graph.get(nid, []))
-    return out
+    return _walk(graph, unique_id)
 
 
 def downstream_of(graph: dict[str, list[str]], unique_id: str) -> list[str]:
@@ -63,7 +53,11 @@ def invert_graph(graph: dict[str, list[str]]) -> dict[str, list[str]]:
 
 
 def _walk(adj: dict[str, list[str]], start: str) -> list[str]:
-    seen: set[str] = set()
+    # Seed ``seen`` with ``start`` so the start node is never re-emitted, even
+    # if the graph contains a cycle that eventually points back at it. Without
+    # this seed, a graph like {"A": ["B"], "B": ["A"]} would include "A" in
+    # upstream_of(graph, "A"), contradicting the docstring contract.
+    seen: set[str] = {start}
     out: list[str] = []
     q = deque(adj.get(start, []))
     while q:

@@ -126,7 +126,7 @@ def test_dbt_run_and_watch_calls_scherlok_dbt_on_success():
     # at runtime. Locking these in here so a future regression surfaces.
     for required in (
         "profiles_dir", "select", "include_sources", "include_snapshots",
-        "webhook", "email", "json_mode",
+        "webhook", "email", "json_mode", "show_lineage",
     ):
         assert required in kwargs, f"_dbt_impl call missing kwarg: {required}"
     assert kwargs["json_mode"] is False  # wrapper always runs the human-readable path

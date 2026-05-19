@@ -78,12 +78,31 @@ def test_upstream_of_unknown_node_returns_empty(graph):
     assert upstream_of(graph, "model.does_not_exist") == []
 
 
-def test_upstream_of_dedupes_diamond(graph):
-    # stg_customers appears twice on the way to fct_orders:
-    # (fct_orders -> stg_customers) and (fct_orders -> int -> stg -> ...) — but
-    # only the direct edge is in our fixture. Still: BFS must dedupe.
-    ancestors = upstream_of(graph, "model.jaffle_shop.fct_orders")
-    assert len(ancestors) == len(set(ancestors))
+def test_upstream_of_dedupes_diamond():
+    """A true diamond (A inherits from B + C, both from D) emits D exactly once."""
+    diamond = {
+        "A": ["B", "C"],
+        "B": ["D"],
+        "C": ["D"],
+        "D": [],
+    }
+    ancestors = upstream_of(diamond, "A")
+    assert ancestors.count("D") == 1
+    assert set(ancestors) == {"B", "C", "D"}
+
+
+def test_upstream_of_excludes_self_under_cycle():
+    """Even with A → B → A, walking from A must not emit A."""
+    cyclic = {"A": ["B"], "B": ["A"]}
+    assert "A" not in upstream_of(cyclic, "A")
+    assert upstream_of(cyclic, "A") == ["B"]
+
+
+def test_downstream_of_excludes_self_under_cycle():
+    """Mirror of the upstream cycle guard, walking children."""
+    cyclic = {"A": ["B"], "B": ["A"]}
+    assert "A" not in downstream_of(cyclic, "A")
+    assert downstream_of(cyclic, "A") == ["B"]
 
 
 # ----- downstream_of --------------------------------------------------------
