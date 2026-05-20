@@ -29,6 +29,28 @@ def test_connect_success_and_memory_forms():
     assert c.connect() is True
 
 
+def test_database_path_supported_forms():
+    from scherlok.connectors.duckdb import DuckDBConnector
+
+    cases = {
+        ":memory:": ":memory:",
+        "duckdb://:memory:": ":memory:",
+        "duckdb:///:memory:": ":memory:",
+        "duckdb:///path/to/file.db": "/path/to/file.db",
+        "duckdb:///tmp/file.db?mode=ro": "/tmp/file.db",
+    }
+    for connection_string, path in cases.items():
+        assert DuckDBConnector(connection_string)._database_path() == path
+
+
+def test_two_slash_relative_url_raises():
+    from scherlok.connectors.duckdb import DuckDBConnector
+
+    for connection_string in ["duckdb://file.db", "duckdb://data/file.db"]:
+        with pytest.raises(ValueError, match="Use 'duckdb:///path/to/file.db'"):
+            DuckDBConnector(connection_string)._database_path()
+
+
 def test_get_connector_returns_duckdb_connector():
     from scherlok.connectors import get_connector
     from scherlok.connectors.duckdb import DuckDBConnector

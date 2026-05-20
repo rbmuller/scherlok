@@ -36,6 +36,11 @@ class DuckDBConnector(BaseConnector):
         parsed = urlparse(self.connection_string)
         if parsed.netloc == ":memory:" or parsed.path == "/:memory:":
             return ":memory:"
+        if parsed.scheme == "duckdb" and parsed.netloc:
+            raise ValueError(
+                f"Invalid duckdb URL: {self.connection_string!r}. "
+                "Use 'duckdb:///path/to/file.db' or 'duckdb:///:memory:'."
+            )
         return unquote(parsed.path)
 
     @staticmethod
