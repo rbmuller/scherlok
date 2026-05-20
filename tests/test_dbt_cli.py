@@ -235,3 +235,148 @@ def test_dbt_output_invalid_value_rejected(tmp_path, monkeypatch):
     )
     assert result.exit_code == 1
     assert "Invalid --output" in result.output
+
+
+# ---------- --show-lineage + per-anomaly downstream enrichment -----------
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_show_lineage_prints_trees(mock_get_connector, tmp_path, monkeypatch):
+    """--show-lineage prints upstream/downstream ASCII trees under each model."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake
+
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.return_value = ([], {"row_count": 100})
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+                "--show-lineage",
+                "--select", "fct_orders",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    # Upstream section: fct_orders depends on int_orders_pivoted + stg_customers
+    assert "Upstream of fct_orders" in result.output
+    assert "int_orders_pivoted" in result.output
+    assert "stg_customers" in result.output
+    # Box-drawing glyphs from the renderer made it through
+    assert "├──" in result.output or "└──" in result.output
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_show_lineage_off_by_default(mock_get_connector, tmp_path, monkeypatch):
+    """Without --show-lineage, no tree blocks are printed."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake
+
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.return_value = ([], {"row_count": 100})
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Upstream of" not in result.output
+    assert "Downstream of" not in result.output
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_anomaly_message_enriched_with_downstream(mock_get_connector, tmp_path, monkeypatch):
+    """When an anomaly fires on a node with descendants, the message names them."""
+    from scherlok.detector.severity import Severity
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake
+
+    # stg_customers has fct_orders + dim_customers_inc downstream per the
+    # fixture's parent_map. An anomaly on it should mention both.
+    anomaly = {
+        "table": "stg_customers",
+        "severity": Severity.CRITICAL,
+        "type": "volume_drop",
+        "message": "Row count dropped 60%",
+    }
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.side_effect = [
+            ([anomaly], {"row_count": 40}),  # stg_customers
+            ([], {"row_count": 100}),
+            ([], {"row_count": 200}),
+            ([], {"row_count": 300}),
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    # Default --fail-on=critical exits 1 on this CRITICAL
+    assert result.exit_code == 1
+    # Message must be enriched in place (so alerter payloads carry the same info)
+    assert "Affects" in anomaly["message"]
+    assert "downstream model" in anomaly["message"]
+    assert "fct_orders" in anomaly["message"]
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_anomaly_message_unchanged_for_leaf(mock_get_connector, tmp_path, monkeypatch):
+    """Anomalies on leaf marts (no descendants) get no `Affects ...` suffix."""
+    from scherlok.detector.severity import Severity
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = ["fct_orders"]
+    mock_get_connector.return_value = fake
+
+    anomaly = {
+        "table": "fct_orders",
+        "severity": Severity.WARNING,
+        "type": "schema_drift",
+        "message": "column `customer_id` type changed",
+    }
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.return_value = ([anomaly], {"row_count": 100})
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+                "--select", "fct_orders",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output  # WARNING does not fail by default
+    # No downstream suffix because fct_orders has no descendants in the fixture
+    assert "Affects" not in anomaly["message"]
