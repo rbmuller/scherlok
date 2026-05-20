@@ -39,10 +39,14 @@ snowflake = [
 mysql = [
     "pymysql>=1.1",
 ]
+duckdb = [
+    "duckdb>=0.9",
+]
 dbt = [
     "pyyaml>=6.0",
 ]
 dev = [
+    "duckdb>=0.9",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",

@@ -99,7 +99,7 @@ Or collapse both steps into one with the wrapper:
 - run: scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
 ```
 
-**Supported adapters:** `postgres`, `bigquery`, `snowflake`, `mysql`. For others, pass `--connection-string` explicitly.
+**Supported adapters:** `postgres`, `bigquery`, `snowflake`, `mysql`, `duckdb`. For others, pass `--connection-string` explicitly.
 
 📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
 
@@ -214,6 +214,10 @@ scherlok connect snowflake://account/database/schema
 # MySQL
 pip install scherlok[mysql]
 scherlok connect mysql://user:pass@host:3306/dbname
+
+# DuckDB
+pip install scherlok[duckdb]
+scherlok connect duckdb:///path/to/file.db
 ```
 
 | Database | Status |
@@ -222,7 +226,7 @@ scherlok connect mysql://user:pass@host:3306/dbname
 | BigQuery | Available |
 | Snowflake | Available |
 | MySQL | Available |
-| DuckDB | Planned |
+| DuckDB | Available |
 
 ## Remote Storage
 

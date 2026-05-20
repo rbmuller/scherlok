@@ -26,6 +26,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from scherlok.connectors.duckdb import DuckDBConnector
+    CONNECTOR_SCHEMES["duckdb"] = DuckDBConnector
+except ImportError:
+    pass
+
 def get_connector(connection_string: str) -> BaseConnector:
     """Return the appropriate connector for a given connection string.
 
