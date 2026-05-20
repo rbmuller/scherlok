@@ -7,12 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-20
+
 ### Added
-- **`scherlok dbt --include-snapshots`** — opt-in flag to also profile dbt snapshot nodes. Snapshots are SCD Type 2 tables that physically exist in the warehouse and are profilable like any other materialized model; they were skipped in v0 because `discover_models` filtered to `resource_type == "model"`. When the flag is unset, behavior is unchanged. ([#22](https://github.com/rbmuller/scherlok/issues/22))
-- **`scherlok dbt-run-and-watch`** — wraps the typical CI sequence (`dbt run` -> `scherlok dbt`) into one invocation. Streams `dbt run` output live; if `dbt run` fails, exits with the same code WITHOUT running scherlok against a stale or partial manifest. Passes `--target`, `--profiles-dir`, and `--select` through to `dbt run`. Requires the `dbt` binary on PATH (dbt-core remains an opt-in dependency). ([#34](https://github.com/rbmuller/scherlok/issues/34))
-- **dbt lineage from `manifest.json`** — new `scherlok.dbt.lineage` module reads the manifest's `parent_map` and exposes `build_dependency_graph`, `upstream_of`, `downstream_of`, `invert_graph`, and `render_lineage_tree`. Two surfaces consume it:
-  - **`scherlok dbt --show-lineage`** (also on `dbt-run-and-watch`) prints an ASCII upstream/downstream tree (`├──` / `└──` style) under each profiled model.
-  - **Per-anomaly downstream impact**: every anomaly message is now suffixed with `· Affects N downstream models: a, b, c` when descendants exist, so webhook and email payloads tell on-call who's about to be paged downstream. Leaf marts get no suffix. ([#36](https://github.com/rbmuller/scherlok/issues/36))
+
+#### Connectors
+- **MySQL connector** — `pip install scherlok[mysql]`, `scherlok connect mysql://user:pass@host:3306/db`. Works with MariaDB and other compatible forks. ([#45](https://github.com/rbmuller/scherlok/pull/45), closes [#18](https://github.com/rbmuller/scherlok/issues/18))
+- **DuckDB connector** — `pip install scherlok[duckdb]`, `scherlok connect duckdb:///path/to/file.db` (or `duckdb:///:memory:`). For local-first analytics workflows. ([#50](https://github.com/rbmuller/scherlok/pull/50), closes [#19](https://github.com/rbmuller/scherlok/issues/19))
+
+#### dbt integration
+- **`scherlok dbt-run-and-watch`** — wraps the typical CI sequence (`dbt run` -> `scherlok dbt`) into one invocation. Streams `dbt run` output live; if `dbt run` fails, exits with the same code WITHOUT running scherlok against a stale or partial manifest. Passes `--target`, `--profiles-dir`, and `--select` through to `dbt run`. Requires the `dbt` binary on PATH (dbt-core remains an opt-in dependency). ([#40](https://github.com/rbmuller/scherlok/pull/40), closes [#34](https://github.com/rbmuller/scherlok/issues/34))
+- **`scherlok dbt --output json`** — emits a single JSON document on stdout (status + per-model anomalies) for CI parsers, with Rich chatter rerouted to stderr so stdout stays machine-readable. ([#41](https://github.com/rbmuller/scherlok/pull/41), closes [#33](https://github.com/rbmuller/scherlok/issues/33))
+- **`scherlok dbt --include-snapshots`** — opt-in flag to also profile dbt snapshot nodes. Snapshots are SCD Type 2 tables that physically exist in the warehouse and are profilable like any other materialized model. When the flag is unset, behavior is unchanged. ([#26](https://github.com/rbmuller/scherlok/pull/26), closes [#22](https://github.com/rbmuller/scherlok/issues/22))
+- **dbt lineage from `manifest.json`** — new `scherlok.dbt.lineage` module reads the manifest's `parent_map`. Two surfaces consume it: `scherlok dbt --show-lineage` (also on `dbt-run-and-watch`) prints an ASCII upstream/downstream tree (`├──` / `└──` style) under each profiled model; and every anomaly message is suffixed with `· Affects N downstream models: a, b, c` when descendants exist, so webhook and email payloads tell on-call who's about to be paged downstream. Leaf marts get no suffix. ([#49](https://github.com/rbmuller/scherlok/pull/49), closes [#36](https://github.com/rbmuller/scherlok/issues/36))
+
+#### Dashboard
+- **14-day anomaly trend barchart** — per-day severity bars in the HTML report. ([#28](https://github.com/rbmuller/scherlok/pull/28), closes [#20](https://github.com/rbmuller/scherlok/issues/20))
+- **Stale tables panel** — surfaces tables whose last profile is older than the freshness threshold, to catch silent ETL failures. ([#30](https://github.com/rbmuller/scherlok/pull/30), closes [#21](https://github.com/rbmuller/scherlok/issues/21))
+
+#### CLI
+- **`scherlok check`** — alias for `scherlok ci --fail-on critical`, the one-liner CI gate. ([#44](https://github.com/rbmuller/scherlok/pull/44), closes [#32](https://github.com/rbmuller/scherlok/issues/32))
+- **`scherlok connect` with no args** prints example connection strings for every supported adapter instead of erroring. ([#24](https://github.com/rbmuller/scherlok/pull/24), closes [#23](https://github.com/rbmuller/scherlok/issues/23))
+
+#### Distribution
+- **Docker image** — multi-stage Dockerfile published to GHCR. ([#38](https://github.com/rbmuller/scherlok/pull/38), closes [#35](https://github.com/rbmuller/scherlok/issues/35))
+
+### Changed
+- Release workflow fails if the `linux/amd64` image exceeds 100 MiB, so the published image can't silently bloat. ([#43](https://github.com/rbmuller/scherlok/pull/43))
 
 ## [0.5.0] — 2026-04-30
 
@@ -83,7 +104,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack webhook integration
 - 59 unit tests
 
-[Unreleased]: https://github.com/rbmuller/scherlok/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rbmuller/scherlok/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rbmuller/scherlok/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/rbmuller/scherlok/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rbmuller/scherlok/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rbmuller/scherlok/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/rbmuller/scherlok/compare/v0.2.0...v0.2.2
