@@ -115,6 +115,29 @@ One self-contained HTML file (~28 KB): KPIs, per-table incidents grouped with fi
 
 📖 Full docs: [dashboard guide →](src/scherlok/dashboard/README.md)
 
+## Use it from an AI agent (MCP)
+
+Let Claude Code / Claude Desktop run data-quality checks directly:
+
+```bash
+pip install scherlok[mcp]
+```
+
+```json
+{
+  "mcpServers": {
+    "scherlok": {
+      "command": "scherlok-mcp",
+      "env": { "SCHERLOK_CONNECTION": "postgresql://user:pass@host/db" }
+    }
+  }
+}
+```
+
+The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, and `check` as tools. Credentials are resolved server-side (never passed by the model), every operation is read-only on the warehouse, and there's no arbitrary-SQL tool.
+
+📖 Full docs: [MCP server guide →](src/scherlok/mcp/README.md)
+
 ## How It Works
 
 ### 1. `investigate` — Learn the patterns

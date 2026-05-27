@@ -45,8 +45,12 @@ duckdb = [
 dbt = [
     "pyyaml>=6.0",
 ]
+mcp = [
+    "mcp>=1.2",
+]
 dev = [
     "duckdb>=0.9",
+    "mcp>=1.2",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
@@ -55,6 +59,7 @@ dev = [
 
 [project.scripts]
 scherlok = "scherlok.cli:app"
+scherlok-mcp = "scherlok.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/rbmuller/scherlok"

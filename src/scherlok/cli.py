@@ -18,10 +18,7 @@ from scherlok.alerter.webhook import send_webhook
 from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.detector.anomaly import detect_volume_anomalies
-from scherlok.detector.cardinality import detect_cardinality_anomalies
-from scherlok.detector.distribution_shift import detect_distribution_shift
 from scherlok.detector.freshness import detect_freshness_anomalies
-from scherlok.detector.nullability import detect_nullability_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
 from scherlok.output import error as out_error
 from scherlok.output import info as out_info
@@ -30,6 +27,7 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
+from scherlok.service import profile_and_detect
 from scherlok.store.remote import sync_context
 from scherlok.store.sqlite import ProfileStore
 
@@ -211,49 +209,11 @@ def investigate() -> None:
 def _watch_table(connector: object, store: ProfileStore, table: str) -> tuple[list[dict], dict]:
     """Profile one table + detect anomalies against stored baseline. Saves new profiles.
 
-    Returns (anomalies, current_volume) — `current_volume` is handy for callers
-    that want to display row counts inline (e.g. dbt-style ✓/✗ output).
+    Thin CLI-facing alias over `service.profile_and_detect` — kept so existing
+    call sites and tests that patch `scherlok.cli._watch_table` stay valid.
+    Returns (anomalies, current_volume).
     """
-    anomalies: list[dict] = []
-
-    current_vol = profile_volume(connector, table)
-    stored_vol = store.get_latest_profile(table, "volume")
-    if stored_vol:
-        anomalies.extend(detect_volume_anomalies(table, current_vol, stored_vol))
-
-    current_sch = profile_schema(connector, table)
-    stored_sch = store.get_latest_profile(table, "schema")
-    if stored_sch:
-        anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
-
-    current_fresh = profile_freshness(connector, table)
-    stored_fresh = store.get_latest_profile(table, "freshness")
-    if stored_fresh:
-        anomalies.extend(
-            detect_freshness_anomalies(table, current_fresh, stored_fresh)
-        )
-
-    for col in (current_sch or {}).get("columns", []):
-        col_name = col["name"]
-        current_dist = profile_distribution(connector, table, col_name)
-        stored_dist = store.get_latest_profile(table, f"distribution:{col_name}")
-        if stored_dist:
-            anomalies.extend(
-                detect_nullability_anomalies(table, col_name, current_dist, stored_dist)
-            )
-            anomalies.extend(
-                detect_distribution_shift(table, col_name, current_dist, stored_dist)
-            )
-            anomalies.extend(
-                detect_cardinality_anomalies(table, col_name, current_dist, stored_dist)
-            )
-        store.save_profile(table, f"distribution:{col_name}", current_dist)
-
-    store.save_profile(table, "volume", current_vol)
-    store.save_profile(table, "schema", current_sch)
-    store.save_profile(table, "freshness", current_fresh)
-
-    return anomalies, current_vol
+    return profile_and_detect(connector, store, table)
 
 
 def _dispatch_alerts(

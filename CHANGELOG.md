@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **MCP server** — `pip install scherlok[mcp]` adds a `scherlok-mcp` stdio server that exposes Scherlok to AI coding agents (Claude Code, Claude Desktop, …) as MCP tools: `list_tables`, `investigate`, `watch`, `status`, `history`, `check`. The connection is resolved server-side (`SCHERLOK_CONNECTION` / `scherlok config`) and never passed by the model; every operation is read-only on the warehouse with no arbitrary-SQL tool, and output is bounded. See [`src/scherlok/mcp/README.md`](src/scherlok/mcp/README.md). ([#54](https://github.com/rbmuller/scherlok/issues/54))
+
+### Changed
+- Extracted the per-table profile-and-detect orchestration into `scherlok.service` so the CLI and the new MCP server share one core (no behavior change).
+
 ## [0.6.0] — 2026-05-20
 
 ### Added
