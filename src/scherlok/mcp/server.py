@@ -215,8 +215,9 @@ def build_server() -> Any:
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:  # pragma: no cover - exercised via packaging
         raise ImportError(
-            "The MCP server requires the 'mcp' package. "
-            "Install it with: pip install scherlok[mcp]"
+            "The MCP server requires the 'mcp' package, which ships with "
+            "scherlok by default. Re-install scherlok to pull it in: "
+            "pip install --upgrade scherlok"
         ) from exc
 
     server = FastMCP(SERVER_NAME)
