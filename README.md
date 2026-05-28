@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.rbmuller/scherlok -->
 <div align="center">
 
 <img src="https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white" alt="Python 3.10+">
