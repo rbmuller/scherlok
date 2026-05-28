@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scherlok"
-version = "0.6.0"
+version = "0.7.0"
 description = "A detective for your data. Zero-config data quality monitoring."
 readme = "README.md"
 license = "MIT"
@@ -27,6 +27,7 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "requests>=2.28.0",
     "jinja2>=3.0",
+    "mcp>=1.2",
 ]
 
 [project.optional-dependencies]

@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-28
+
 ### Added
-- **MCP server** — `pip install scherlok[mcp]` adds a `scherlok-mcp` stdio server that exposes Scherlok to AI coding agents (Claude Code, Claude Desktop, …) as MCP tools: `list_tables`, `investigate`, `watch`, `status`, `history`, `check`. The connection is resolved server-side (`SCHERLOK_CONNECTION` / `scherlok config`) and never passed by the model; every operation is read-only on the warehouse with no arbitrary-SQL tool, and output is bounded. See [`src/scherlok/mcp/README.md`](src/scherlok/mcp/README.md). ([#54](https://github.com/rbmuller/scherlok/issues/54))
+- **MCP server** — `pip install scherlok` now ships a `scherlok-mcp` stdio server that exposes Scherlok to AI coding agents (Claude Code, Claude Desktop, …) as MCP tools: `list_tables`, `investigate`, `watch`, `status`, `history`, `check`. The connection is resolved server-side (`SCHERLOK_CONNECTION` / `scherlok config`) and never passed by the model; every operation is read-only on the warehouse with no arbitrary-SQL tool, and output is bounded. See [`src/scherlok/mcp/README.md`](src/scherlok/mcp/README.md). ([#54](https://github.com/rbmuller/scherlok/issues/54), [#55](https://github.com/rbmuller/scherlok/pull/55))
+- **`server.json` + PyPI ownership marker** — repo-root `server.json` and an `mcp-name: io.github.rbmuller/scherlok` marker in the README so Scherlok can be published to the official MCP Registry (registry.modelcontextprotocol.io). ([#56](https://github.com/rbmuller/scherlok/pull/56))
 
 ### Changed
-- Extracted the per-table profile-and-detect orchestration into `scherlok.service` so the CLI and the new MCP server share one core (no behavior change).
+- **`mcp` is now a core dependency** (moved out of the `[mcp]` extra) so the registry's `pip install scherlok` install path produces a working `scherlok-mcp` without an extra step. The `[mcp]` extra is kept as a back-compat alias and still resolves cleanly. This adds ~15 transitive packages (anyio, pydantic, httpx, starlette, uvicorn family) to the base install; the trade was deliberate — first-class agent integration over a lean install.
+- Extracted the per-table profile-and-detect orchestration into `scherlok.service` so the CLI and the MCP server share one transport-agnostic core (no behavior change).
 
 ## [0.6.0] — 2026-05-20
 
@@ -110,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack webhook integration
 - 59 unit tests
 
-[Unreleased]: https://github.com/rbmuller/scherlok/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rbmuller/scherlok/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rbmuller/scherlok/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rbmuller/scherlok/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rbmuller/scherlok/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rbmuller/scherlok/compare/v0.3.0...v0.4.0
