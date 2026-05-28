@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.rbmuller/scherlok",
+  "title": "Scherlok",
+  "description": "Zero-config data quality monitoring as MCP tools. Profile a warehouse, detect anomalies (volume / schema / freshness / NULL / distribution / cardinality), and gate CI — all read-only, credentials resolved server-side.",
+  "repository": {
+    "url": "https://github.com/rbmuller/scherlok",
+    "source": "github"
+  },
+  "version": "0.7.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "scherlok",
+      "version": "0.7.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SCHERLOK_CONNECTION",
+          "description": "Warehouse connection string (postgresql://, bigquery://, snowflake://, mysql://, duckdb:///path). Resolved server-side; never passed by the model.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
