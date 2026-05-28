@@ -121,7 +121,7 @@ One self-contained HTML file (~28 KB): KPIs, per-table incidents grouped with fi
 Let Claude Code / Claude Desktop run data-quality checks directly:
 
 ```bash
-pip install scherlok[mcp]
+pip install scherlok   # scherlok-mcp ships built-in since v0.7.0
 ```
 
 ```json

@@ -8,10 +8,10 @@ results it reasons over, instead of shelling out and parsing text.
 ## Install
 
 ```bash
-pip install scherlok[mcp]
+pip install scherlok
 ```
 
-This adds the `mcp` SDK and the `scherlok-mcp` console script (a stdio server).
+The MCP server ships built-in since v0.7.0 — the `scherlok-mcp` console script (a stdio server) is installed alongside the `scherlok` CLI. (The legacy `pip install scherlok[mcp]` still works as a back-compat alias.)
 
 ## Configure the connection (server-side)
 

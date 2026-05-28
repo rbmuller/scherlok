@@ -16,11 +16,13 @@ permissions:
   contents: read
 
 # Catch dependency bloat early: if a new transitive dep silently doubles the
-# image, fail the publish before a release tag goes out. The current image
-# (python:3.12-slim + scherlok wheel + warehouse extras) sits ~85-95 MiB, so
-# 100 MiB is a small headroom and not a stretch target.
+# image, fail the publish before a release tag goes out. v0.7.0 added the
+# `mcp` core dep (pydantic, anyio, httpx, starlette, uvicorn family) which
+# lifts the baseline ~5-10 MiB above v0.6.0's 85-95 MiB; the cap was bumped
+# to 130 MiB to keep the same "small headroom" framing without false-failing
+# the legitimate growth.
 env:
-  MAX_IMAGE_SIZE_BYTES: 104857600
+  MAX_IMAGE_SIZE_BYTES: 136314880
 
 jobs:
   build-and-push:
