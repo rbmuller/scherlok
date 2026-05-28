@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.rbmuller/scherlok",
   "title": "Scherlok",
-  "description": "Zero-config data quality monitoring as MCP tools. Profile a warehouse, detect anomalies (volume / schema / freshness / NULL / distribution / cardinality), and gate CI — all read-only, credentials resolved server-side.",
+  "description": "Zero-config data-quality monitoring: profile a warehouse, detect anomalies, gate CI.",
   "repository": {
     "url": "https://github.com/rbmuller/scherlok",
     "source": "github"
