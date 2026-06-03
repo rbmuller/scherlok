@@ -6,6 +6,7 @@
 <img src="https://img.shields.io/github/license/rbmuller/scherlok" alt="MIT License">
 <a href="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml"><img src="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://glama.ai/mcp/servers/rbmuller/scherlok"><img src="https://glama.ai/mcp/servers/rbmuller/scherlok/badges/score.svg" alt="Glama score"></a>
+<a href="https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok"><img src="https://img.shields.io/badge/MCP%20Registry-io.github.rbmuller%2Fscherlok-success?logo=anthropic" alt="MCP Registry"></a>
 
 <br><br>
 
