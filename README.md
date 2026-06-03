@@ -5,6 +5,7 @@
 <img src="https://img.shields.io/pypi/v/scherlok?color=green" alt="PyPI">
 <img src="https://img.shields.io/github/license/rbmuller/scherlok" alt="MIT License">
 <a href="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml"><img src="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://glama.ai/mcp/servers/rbmuller/scherlok"><img src="https://glama.ai/mcp/servers/rbmuller/scherlok/badges/score.svg" alt="Glama score"></a>
 
 <br><br>
 
