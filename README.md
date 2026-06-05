@@ -226,7 +226,7 @@ scherlok watch --email team@company.com --email cto@company.com
 # PostgreSQL
 scherlok connect postgres://user:pass@host:5432/db
 
-# BigQuery
+# BigQuery — see src/scherlok/connectors/bigquery.md for auth, billing, CI patterns
 pip install scherlok[bigquery]
 scherlok connect bigquery://project-id/dataset-name
 
