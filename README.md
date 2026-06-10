@@ -3,8 +3,8 @@
 
 <img src="https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white" alt="Python 3.10+">
 <img src="https://img.shields.io/pypi/v/scherlok?color=green" alt="PyPI">
-<a href="https://pepy.tech/project/scherlok"><img src="https://img.shields.io/pypi/dm/scherlok?color=blue&label=downloads" alt="PyPI downloads"></a>
-<img src="https://img.shields.io/github/license/rbmuller/scherlok" alt="MIT License">
+<a href="https://pepy.tech/project/scherlok"><img src="https://img.shields.io/pepy/dt/scherlok?color=blue&label=downloads" alt="PyPI downloads"></a>
+<img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
 <a href="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml"><img src="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://glama.ai/mcp/servers/rbmuller/scherlok"><img src="https://glama.ai/mcp/servers/rbmuller/scherlok/badges/score.svg" alt="Glama score"></a>
 <a href="https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok"><img src="https://img.shields.io/badge/MCP%20Registry-io.github.rbmuller%2Fscherlok-success?logo=anthropic" alt="MCP Registry"></a>
