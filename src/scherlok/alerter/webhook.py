@@ -10,8 +10,11 @@ import logging
 import requests
 
 from scherlok.detector.severity import Severity
+from scherlok.explainer import format_explanation_text, format_unavailable_note
 
 logger = logging.getLogger(__name__)
+
+EXPLANATION_COLOR = "#6B46C1"
 
 SEVERITY_EMOJI = {
     Severity.INFO: "ℹ️",
@@ -85,6 +88,58 @@ def _payload_generic(anomalies: list[dict]) -> dict:
     }
 
 
+def _slack_explanation_attachment(explanation: dict) -> dict:
+    """Slack attachment carrying the --explain hypothesis under the alert."""
+    text = (
+        f":brain: *AI hypothesis* (`--explain`)\n"
+        f"{explanation.get('summary', '')}\n"
+        f"*Likely cause:* {explanation.get('likely_cause', '')}"
+    )
+    steps = explanation.get("diagnostic_steps") or []
+    if steps:
+        numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
+        text += f"\n*Check next:*\n{numbered}"
+    return {
+        "color": EXPLANATION_COLOR,
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+        ],
+    }
+
+
+def _inject_explanation(
+    payload: dict,
+    platform: str,
+    explanation: dict | None,
+    explain_note: str | None,
+) -> None:
+    """Mutate the platform payload in place with the hypothesis or the
+    unavailable-note. No-op when neither is set (the `--explain`-off path)."""
+    if explanation:
+        if platform == "slack":
+            payload["attachments"] = [_slack_explanation_attachment(explanation)]
+        elif platform == "discord":
+            payload["content"] += "\n\n" + format_explanation_text(explanation)
+        elif platform == "teams":
+            payload["text"] += "<br><br>" + format_explanation_text(explanation).replace(
+                "\n", "<br>"
+            )
+        else:
+            payload["explanation"] = explanation
+    elif explain_note:
+        note = format_unavailable_note(explain_note)
+        if platform == "slack":
+            payload["blocks"].append(
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": note}]}
+            )
+        elif platform == "discord":
+            payload["content"] += f"\n\n{note}"
+        elif platform == "teams":
+            payload["text"] += f"<br><br>{note}"
+        else:
+            payload["explanation_error"] = explain_note
+
+
 def _detect_platform(url: str) -> str:
     """Auto-detect platform from webhook URL."""
     url_lower = url.lower()
@@ -97,8 +152,18 @@ def _detect_platform(url: str) -> str:
     return "generic"
 
 
-def send_webhook(url: str, anomalies: list[dict]) -> bool:
+def send_webhook(
+    url: str,
+    anomalies: list[dict],
+    explanation: dict | None = None,
+    explain_note: str | None = None,
+) -> bool:
     """Send anomalies to a webhook URL. Auto-detects platform format.
+
+    `explanation` (the --explain hypothesis) rides along as a Slack
+    attachment, appended text on Discord/Teams, or an `explanation` field
+    on the generic JSON payload. `explain_note` is the fallback one-liner
+    when the explanation could not be produced.
 
     Returns True if the request succeeded (2xx status).
     """
@@ -113,6 +178,7 @@ def send_webhook(url: str, anomalies: list[dict]) -> bool:
         "generic": _payload_generic,
     }
     payload = formatters[platform](anomalies)
+    _inject_explanation(payload, platform, explanation, explain_note)
 
     try:
         resp = requests.post(url, json=payload, timeout=10)

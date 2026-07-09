@@ -142,6 +142,41 @@ The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, and `
 
 📖 Full docs: [MCP server guide →](src/scherlok/mcp/README.md)
 
+## AI-explained alerts (`--explain`)
+
+Your alert says **what** broke. `--explain` adds **why** — and what to check next.
+
+```bash
+pip install 'scherlok[explain]'
+export ANTHROPIC_API_KEY=sk-ant-...
+
+scherlok watch --webhook https://hooks.slack.com/... --explain
+```
+
+When anomalies fire, Scherlok makes **one** Claude call for the whole batch and injects a short root-cause hypothesis into the same Slack/Discord/Teams/email/JSON alert:
+
+```
+🔴 CRITICAL  orders     volume_drop       Row count dropped 52% (1,203,847 → 578,412)
+🟡 WARNING   customers  null_rate_change  Column "email": NULL rate 2.1% → 18.7%
+
+🧠 AI hypothesis (--explain)
+Both anomalies point at the same upstream: orders and customers stopped
+receiving complete rows after last night's deploy.
+Likely cause: the loader migration dropped the NOT NULL default on customers.email
+and truncated the orders staging load.
+Check next:
+  1. Diff the loader's DDL migration merged last night against the previous run.
+  2. Run `scherlok history --days 7` — check whether the NULL creep predates the deploy.
+```
+
+Works on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`. On dbt projects the hypothesis is **lineage-aware**: upstream parents from `manifest.json` go into the prompt, so cascading failures get traced to the source model instead of alerting on every downstream symptom.
+
+- **What it costs** — one call per fired run (not per anomaly), Claude Haiku 4.5 by default: well under a cent per run (~$0.003). Override the model with `SCHERLOK_EXPLAIN_MODEL`. Runs with zero anomalies make no API call.
+- **What it sends** — aggregates only: the anomaly type/severity/message strings already in your alert, dbt model names, detection timestamps. **Never** warehouse rows, cell values, or credentials — the test suite pins this as a contract.
+- **How to turn it off** — it's opt-in; don't pass `--explain`. If the API call fails (no key, timeout, rate limit), the original alert is delivered unchanged with a one-line note. Alerting never blocks on the LLM.
+
+📖 Full docs: [explainer guide →](src/scherlok/explainer/README.md)
+
 ## How It Works
 
 ### 1. `investigate` — Learn the patterns

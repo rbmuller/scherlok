@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -11,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from scherlok import __version__
-from scherlok.alerter.console import print_anomalies, print_profile_summary
+from scherlok.alerter.console import print_anomalies, print_explanation, print_profile_summary
 from scherlok.alerter.email import send_email_alert
 from scherlok.alerter.exitcode import exit_code_for
 from scherlok.alerter.webhook import send_webhook
@@ -20,6 +21,7 @@ from scherlok.connectors import get_connector
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
+from scherlok.explainer import HISTORY_LOOKBACK_DAYS, format_unavailable_note
 from scherlok.output import error as out_error
 from scherlok.output import info as out_info
 from scherlok.output import is_quiet, verbose_info
@@ -37,6 +39,12 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+EXPLAIN_FLAG_HELP = (
+    "Augment fired alerts with a Claude-generated root-cause hypothesis. "
+    "Opt-in; requires ANTHROPIC_API_KEY and `pip install 'scherlok[explain]'`. "
+    "Sends aggregate anomaly data only — never warehouse rows."
+)
 
 
 @app.callback()
@@ -221,26 +229,95 @@ def _dispatch_alerts(
     store: ProfileStore,
     webhook: str | None,
     emails: list[str] | None,
+    *,
+    explain: bool = False,
+    explain_context: dict | None = None,
 ) -> None:
-    """Persist anomalies and fan out to webhook/email alerters."""
+    """Persist anomalies and fan out to webhook/email alerters.
+
+    With `explain`, one Claude call augments the whole batch with a
+    root-cause hypothesis that rides along on every alert channel; when it
+    fails, the unaugmented alert goes out with a one-line note instead.
+    """
     if not anomalies:
         out_info("[green]No anomalies detected.[/green]")
         return
+    explanation: dict | None = None
+    explain_error: str | None = None
+    if explain:
+        # Must run before save_anomalies so the bundle's recent-history
+        # window contains only prior runs, not this very batch.
+        explanation, explain_error = _explain_or_note(anomalies, store, explain_context)
     store.save_anomalies(anomalies)
     if not is_quiet():
         print_anomalies(anomalies)
+        if explanation:
+            print_explanation(explanation)
+    if explain_error:
+        out_error(f"[yellow]{format_unavailable_note(explain_error)}[/yellow]")
     if webhook:
-        ok = send_webhook(webhook, anomalies)
+        ok = send_webhook(webhook, anomalies, explanation=explanation, explain_note=explain_error)
         if ok:
             verbose_info("Webhook delivered.")
         else:
             out_error("[red]Webhook delivery failed.[/red]")
     if emails:
-        ok = send_email_alert(emails, anomalies)
+        ok = send_email_alert(
+            emails, anomalies, explanation=explanation, explain_note=explain_error
+        )
         if ok:
             verbose_info("Email delivered.")
         else:
             out_error("[red]Email delivery failed.[/red]")
+
+
+def _explain_or_note(
+    anomalies: list[dict],
+    store: ProfileStore,
+    context: dict | None,
+) -> tuple[dict | None, str | None]:
+    """Run the one-call explainer for this batch.
+
+    Returns (explanation, None) on success or (None, error_note) on failure.
+    Never raises — --explain is fail-open by contract and must not block
+    the original alert.
+    """
+    from scherlok.explainer import ExplainUnavailableError, build_bundle, explain_anomalies
+
+    context = context or {}
+    try:
+        history = store.get_anomaly_history(days=HISTORY_LOOKBACK_DAYS)
+    except Exception as exc:  # fail-open: a history read must not block alerting
+        verbose_info(f"--explain: anomaly history unavailable ({exc})")
+        history = []
+    tables = {a["table"] for a in anomalies}
+    bundle = build_bundle(
+        anomalies,
+        recent_history=[h for h in history if h.get("table") in tables],
+        lineage=context.get("lineage"),
+        meta=context.get("meta"),
+    )
+    try:
+        return explain_anomalies(bundle), None
+    except ExplainUnavailableError as exc:
+        return None, str(exc)
+
+
+def _explain_context(
+    adapter: str | None = None,
+    fail_on: str | None = None,
+    lineage: dict[str, list[str]] | None = None,
+) -> dict:
+    """Assemble the run-level context forwarded to the explainer bundle."""
+    meta: dict = {"run_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    if adapter:
+        meta["adapter"] = adapter
+    if fail_on:
+        meta["fail_on"] = fail_on
+    context: dict = {"meta": meta}
+    if lineage:
+        context["lineage"] = lineage
+    return context
 
 
 def _run_watch(
@@ -248,12 +325,15 @@ def _run_watch(
     emails: list[str] | None = None,
     tables: list[str] | None = None,
     connector: object | None = None,
+    explain: bool = False,
+    fail_on: str | None = None,
 ) -> list[dict]:
     """Run the watch logic: profile + detect + alert. Returns all anomalies.
 
     Reused by `watch`, `ci`, and `dbt` commands. When `tables` is None, all
     tables visible to the connector are used. When `connector` is None, one
-    is loaded from the saved config.
+    is loaded from the saved config. `fail_on` only feeds the --explain
+    context; exit-code policy stays with the callers.
     """
     if connector is None:
         connector = _get_connector_or_exit()
@@ -272,9 +352,26 @@ def _run_watch(
             anomalies, _ = _watch_table(connector, store, table)
             all_anomalies.extend(anomalies)
 
-        _dispatch_alerts(all_anomalies, store, webhook, emails)
+        _dispatch_alerts(
+            all_anomalies,
+            store,
+            webhook,
+            emails,
+            explain=explain,
+            explain_context=_explain_context(
+                adapter=_adapter_from_connection(cfg.get_connection_string()),
+                fail_on=fail_on,
+            ),
+        )
 
     return all_anomalies
+
+
+def _adapter_from_connection(conn_str: str | None) -> str | None:
+    """Extract the adapter scheme ('postgresql', 'bigquery', …) from a URL."""
+    if not conn_str or "://" not in conn_str:
+        return None
+    return conn_str.split("://", 1)[0]
 
 
 @app.command()
@@ -287,6 +384,7 @@ def watch(
         None, "--email", "-e",
         help="Email recipient(s) for alerts. Repeat to send to multiple.",
     ),
+    explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
 ) -> None:
     """Compare current state vs stored profile. Detect anomalies.
 
@@ -294,8 +392,9 @@ def watch(
         scherlok watch
         scherlok watch --webhook https://hooks.slack.com/...
         scherlok watch --email alice@company.com --email bob@company.com
+        scherlok watch --webhook https://hooks.slack.com/... --explain
     """
-    anomalies = _run_watch(webhook=webhook, emails=email or None)
+    anomalies = _run_watch(webhook=webhook, emails=email or None, explain=explain)
     raise typer.Exit(code=exit_code_for(anomalies))
 
 
@@ -304,6 +403,7 @@ def _run_ci(
     webhook: str | None,
     email: list[str] | None,
     fail_on: str,
+    explain: bool = False,
 ) -> None:
     # Save connection
     cfg = ScherlokConfig.load()
@@ -317,7 +417,9 @@ def _run_ci(
         raise typer.Exit(code=1)
 
     # Run watch (does profile + detect + alert in one)
-    anomalies = _run_watch(webhook=webhook, emails=email or None)
+    anomalies = _run_watch(
+        webhook=webhook, emails=email or None, explain=explain, fail_on=fail_on
+    )
 
     # Custom exit code based on --fail-on
     fail_on_lower = fail_on.lower()
@@ -345,6 +447,7 @@ def ci(
         "critical", "--fail-on",
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
+    explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
 ) -> None:
     """All-in-one CI/CD command: connect + investigate + watch + exit code.
 
@@ -358,7 +461,7 @@ def ci(
             scherlok config --store s3://my-bucket/scherlok/profiles.db
             scherlok ci $DATABASE_URL --webhook $SLACK_URL --fail-on critical
     """
-    _run_ci(connection_string, webhook, email, fail_on)
+    _run_ci(connection_string, webhook, email, fail_on, explain)
 
 
 @app.command()
@@ -376,9 +479,10 @@ def check(
         "critical", "--fail-on",
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
+    explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
 ) -> None:
     """Assertion-only CI alias for `scherlok ci --fail-on critical`."""
-    _run_ci(connection_string, webhook, email, fail_on)
+    _run_ci(connection_string, webhook, email, fail_on, explain)
 
 
 @app.command()
@@ -428,6 +532,7 @@ def dbt(
         help="After each model's result, print an ASCII tree of its upstream "
         "and downstream models from manifest.json.",
     ),
+    explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
 ) -> None:
     """Profile and watch dbt models. Reads target/manifest.json.
 
@@ -476,6 +581,7 @@ def dbt(
             fail_on=fail_on,
             json_mode=json_mode,
             show_lineage=show_lineage,
+            explain=explain,
         )
     finally:
         if json_mode:
@@ -497,6 +603,7 @@ def _dbt_impl(
     fail_on: str,
     json_mode: bool,
     show_lineage: bool = False,
+    explain: bool = False,
 ) -> None:
     """The actual dbt-command body. Extracted so the `dbt()` entry point can
     wrap it in a try/finally that restores the shared output console after
@@ -587,6 +694,7 @@ def _dbt_impl(
     from scherlok.config import PROFILES_DB
     all_anomalies: list[dict] = []
     json_models: list[dict] = []
+    explain_lineage: dict[str, list[str]] = {}
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = ProfileStore()
         for node, physical in matched:
@@ -596,13 +704,26 @@ def _dbt_impl(
             # alerter payloads alike.
             _enrich_anomalies_with_lineage(table_anomalies, node.unique_id, lineage_graph)
             all_anomalies.extend(table_anomalies)
+            if explain and table_anomalies:
+                # Upstream parents feed the explainer bundle: broken parents
+                # usually explain broken children.
+                explain_lineage[physical] = _upstream_preview(lineage_graph, node.unique_id)
             if json_mode:
                 json_models.append(_dbt_model_payload(node, physical, current_vol, table_anomalies))
             else:
                 _print_dbt_model_result(node, physical, current_vol, table_anomalies)
                 if show_lineage:
                     _print_lineage_block(lineage_graph, node.unique_id)
-        _dispatch_alerts(all_anomalies, store, webhook, email or None)
+        _dispatch_alerts(
+            all_anomalies,
+            store,
+            webhook,
+            email or None,
+            explain=explain,
+            explain_context=_explain_context(
+                adapter=adapter, fail_on=fail_on, lineage=explain_lineage or None
+            ),
+        )
 
     # 5. Summary + exit code
     crit = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("CRITICAL"))
@@ -685,6 +806,7 @@ def dbt_run_and_watch(
         help="After each model's result, print an ASCII tree of its upstream "
         "and downstream models from manifest.json.",
     ),
+    explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
 ) -> None:
     """Run `dbt run` then immediately profile the freshly built models.
 
@@ -743,6 +865,7 @@ def dbt_run_and_watch(
         fail_on=fail_on,
         json_mode=False,
         show_lineage=show_lineage,
+        explain=explain,
     )
 
 
@@ -831,6 +954,31 @@ def _enrich_anomalies_with_lineage(
     for a in anomalies:
         msg = a.get("message", "")
         a["message"] = f"{msg}{suffix}"
+
+
+def _upstream_preview(
+    graph: dict[str, list[str]], unique_id: str, hops: int = 2
+) -> list[str]:
+    """Direct parents plus grandparents (2 hops) as display names, deduped.
+
+    Bounded on purpose: the explainer bundle needs likely-cause candidates,
+    not the full ancestry closure that `upstream_of` would return.
+    """
+    from scherlok.dbt import display_name as _display_name
+
+    seen: set[str] = set()
+    names: list[str] = []
+    frontier = list(graph.get(unique_id, []))
+    for _ in range(hops):
+        next_frontier: list[str] = []
+        for uid in frontier:
+            if uid in seen:
+                continue
+            seen.add(uid)
+            names.append(_display_name(uid))
+            next_frontier.extend(graph.get(uid, []))
+        frontier = next_frontier
+    return names
 
 
 def _print_lineage_block(graph: dict[str, list[str]], unique_id: str) -> None:
