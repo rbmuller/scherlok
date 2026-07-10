@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-10
+
 ### Added
-- **`--explain` — Claude-augmented alerts** on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`. When anomalies fire, one Anthropic API call per run (Claude Haiku 4.5 by default, `SCHERLOK_EXPLAIN_MODEL` to override) turns the batch into a root-cause hypothesis — summary, likely cause, up to three diagnostic steps — injected into the Slack (attachment), Discord/Teams (text), generic-JSON (`explanation` field), email, and console alerts. dbt runs feed upstream lineage from `manifest.json` into the prompt so cascading failures trace to the source model. Aggregate data only (anomaly strings, model names, timestamps — never warehouse rows); fail-open by contract: any API failure delivers the unaugmented alert with a one-line `(--explain unavailable: …)` note. Opt-in via `pip install scherlok[explain]` + `ANTHROPIC_API_KEY`. See [`src/scherlok/explainer/README.md`](src/scherlok/explainer/README.md). ([#58](https://github.com/rbmuller/scherlok/issues/58))
+- **`--explain` — Claude-augmented alerts** on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`. When anomalies fire, one Anthropic API call per run (Claude Haiku 4.5 by default, `SCHERLOK_EXPLAIN_MODEL` to override) turns the batch into a root-cause hypothesis — summary, likely cause, up to three diagnostic steps — injected into the Slack (attachment), Discord/Teams (text), generic-JSON (`explanation` field), email, and console alerts, plus an `explanation` key on `dbt --output json`. dbt runs feed upstream lineage from `manifest.json` into the prompt so cascading failures trace to the source model. Aggregate data only (anomaly strings, model names, timestamps — never warehouse rows); fail-open by contract: any API failure delivers the unaugmented alert with a one-line `(--explain unavailable: …)` note, injected text is escaped and truncated per platform so an oversized hypothesis can never get an alert payload rejected, and the alert path is capped at ~30s worst case. Opt-in via `pip install scherlok[explain]` + `ANTHROPIC_API_KEY`. See [`src/scherlok/explainer/README.md`](src/scherlok/explainer/README.md). ([#58](https://github.com/rbmuller/scherlok/issues/58), [#59](https://github.com/rbmuller/scherlok/pull/59))
+- **`--explain` demo recording** — `examples/demo-explain.svg` (asciinema-style cast of a real run), embedded in the README section.
 
 ## [0.7.0] — 2026-05-28
 

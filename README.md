@@ -155,19 +155,9 @@ scherlok watch --webhook https://hooks.slack.com/... --explain
 
 When anomalies fire, Scherlok makes **one** Claude call for the whole batch and injects a short root-cause hypothesis into the same Slack/Discord/Teams/email/JSON alert:
 
-```
-🔴 CRITICAL  orders     volume_drop       Row count dropped 52% (1,203,847 → 578,412)
-🟡 WARNING   customers  null_rate_change  Column "email": NULL rate 2.1% → 18.7%
-
-🧠 AI hypothesis (--explain)
-Both anomalies point at the same upstream: orders and customers stopped
-receiving complete rows after last night's deploy.
-Likely cause: the loader migration dropped the NOT NULL default on customers.email
-and truncated the orders staging load.
-Check next:
-  1. Diff the loader's DDL migration merged last night against the previous run.
-  2. Run `scherlok history --days 7` — check whether the NULL creep predates the deploy.
-```
+<div align="center">
+<img src="examples/demo-explain.svg" alt="scherlok watch --explain: anomalies table followed by the AI hypothesis panel" width="760">
+</div>
 
 Works on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`. On dbt projects the hypothesis is **lineage-aware**: upstream parents from `manifest.json` go into the prompt, so cascading failures get traced to the source model instead of alerting on every downstream symptom.
 
