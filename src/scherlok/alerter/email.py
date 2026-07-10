@@ -9,6 +9,7 @@ Configuration via environment variables:
     SCHERLOK_SMTP_USE_TLS    — default true
 """
 
+import html
 import logging
 import os
 import smtplib
@@ -16,6 +17,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from scherlok.detector.severity import Severity
+from scherlok.explainer import (
+    EXPLANATION_COLOR,
+    EXPLANATION_HEADER,
+    format_explanation_text,
+    format_unavailable_note,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +33,43 @@ SEVERITY_COLOR = {
 }
 
 
-def _build_html(anomalies: list[dict]) -> str:
+def _explanation_html(explanation: dict | None, explain_note: str | None) -> str:
+    """HTML block for the --explain hypothesis (or its fallback note).
+
+    Model output is untrusted text landing in an HTML document — escape it.
+    """
+    if explanation:
+        summary = html.escape(str(explanation.get("summary", "")))
+        cause = html.escape(str(explanation.get("likely_cause", "")))
+        steps = explanation.get("diagnostic_steps") or []
+        steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in steps)
+        steps_block = (
+            f'<p style="margin:8px 0 0"><strong>Check next:</strong></p>'
+            f'<ol style="margin:4px 0 0">{steps_html}</ol>'
+            if steps
+            else ""
+        )
+        header = html.escape(EXPLANATION_HEADER)
+        return (
+            '<div style="margin-top:16px;padding:12px 16px;'
+            f'border-left:4px solid {EXPLANATION_COLOR};background:#faf5ff">'
+            f'<p style="margin:0 0 8px"><strong>{header}</strong></p>'
+            f'<p style="margin:0 0 8px">{summary}</p>'
+            f'<p style="margin:0"><strong>Likely cause:</strong> {cause}</p>'
+            f"{steps_block}"
+            "</div>"
+        )
+    if explain_note:
+        note = html.escape(format_unavailable_note(explain_note))
+        return f'<p style="color:#64748b;font-size:12px;margin-top:16px">{note}</p>'
+    return ""
+
+
+def _build_html(
+    anomalies: list[dict],
+    explanation: dict | None = None,
+    explain_note: str | None = None,
+) -> str:
     """Build HTML email body."""
     cell = "padding:8px;border-bottom:1px solid #e5e7eb"
     rows = []
@@ -64,6 +107,7 @@ def _build_html(anomalies: list[dict]) -> str:
 {"".join(rows)}
 </tbody>
 </table>
+{_explanation_html(explanation, explain_note)}
 <p style="color:#64748b;font-size:12px;margin-top:24px">
 Sent by <a href="https://github.com/rbmuller/scherlok" style="color:#0d9488">Scherlok</a>
 </p>
@@ -72,16 +116,33 @@ Sent by <a href="https://github.com/rbmuller/scherlok" style="color:#0d9488">Sch
 """
 
 
-def _build_text(anomalies: list[dict]) -> str:
+def _build_text(
+    anomalies: list[dict],
+    explanation: dict | None = None,
+    explain_note: str | None = None,
+) -> str:
     """Plain text fallback."""
     lines = [f"Scherlok detected {len(anomalies)} anomalies:", ""]
     for a in anomalies:
         lines.append(f"[{a['severity'].value}] {a['table']} — {a['type']}: {a['message']}")
+    if explanation:
+        lines.extend(["", format_explanation_text(explanation)])
+    elif explain_note:
+        lines.extend(["", format_unavailable_note(explain_note)])
     return "\n".join(lines)
 
 
-def send_email_alert(to_addresses: list[str], anomalies: list[dict]) -> bool:
+def send_email_alert(
+    to_addresses: list[str],
+    anomalies: list[dict],
+    explanation: dict | None = None,
+    explain_note: str | None = None,
+) -> bool:
     """Send email alert with anomalies.
+
+    `explanation` (the --explain hypothesis) is rendered as a highlighted
+    block under the anomaly table; `explain_note` is the fallback one-liner
+    when the explanation could not be produced.
 
     Returns True on success, False if SMTP misconfigured or send fails.
     """
@@ -108,8 +169,8 @@ def send_email_alert(to_addresses: list[str], anomalies: list[dict]) -> bool:
     msg["From"] = sender
     msg["To"] = ", ".join(to_addresses)
 
-    msg.attach(MIMEText(_build_text(anomalies), "plain"))
-    msg.attach(MIMEText(_build_html(anomalies), "html"))
+    msg.attach(MIMEText(_build_text(anomalies, explanation, explain_note), "plain"))
+    msg.attach(MIMEText(_build_html(anomalies, explanation, explain_note), "html"))
 
     try:
         with smtplib.SMTP(host, port, timeout=15) as smtp:

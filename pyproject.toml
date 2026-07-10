@@ -46,10 +46,14 @@ duckdb = [
 dbt = [
     "pyyaml>=6.0",
 ]
+explain = [
+    "anthropic>=0.40",
+]
 mcp = [
     "mcp>=1.2",
 ]
 dev = [
+    "anthropic>=0.40",
     "duckdb>=0.9",
     "mcp>=1.2",
     "pytest>=7.0.0",

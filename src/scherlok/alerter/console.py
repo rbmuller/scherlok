@@ -1,9 +1,12 @@
 """Rich terminal output for anomalies and profiles."""
 
 from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
 from rich.table import Table
 
 from scherlok.detector.severity import Severity
+from scherlok.explainer import EXPLANATION_HEADER
 
 console = Console()
 
@@ -33,6 +36,26 @@ def print_anomalies(anomalies: list[dict]) -> None:
         )
 
     console.print(tbl)
+
+
+def print_explanation(explanation: dict) -> None:
+    """Print the --explain hypothesis as a panel under the anomaly table.
+
+    Model output is escaped so stray `[...]` sequences can't be interpreted
+    as Rich markup.
+    """
+    lines = [
+        escape(str(explanation.get("summary", ""))),
+        "",
+        f"[bold]Likely cause:[/bold] {escape(str(explanation.get('likely_cause', '')))}",
+    ]
+    steps = explanation.get("diagnostic_steps") or []
+    if steps:
+        lines.append("[bold]Check next:[/bold]")
+        lines.extend(f"  {i}. {escape(str(s))}" for i, s in enumerate(steps, 1))
+    console.print(
+        Panel("\n".join(lines), title=EXPLANATION_HEADER, border_style="magenta")
+    )
 
 
 def print_profile_summary(

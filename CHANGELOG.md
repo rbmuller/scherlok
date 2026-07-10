@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`--explain` — Claude-augmented alerts** on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`. When anomalies fire, one Anthropic API call per run (Claude Haiku 4.5 by default, `SCHERLOK_EXPLAIN_MODEL` to override) turns the batch into a root-cause hypothesis — summary, likely cause, up to three diagnostic steps — injected into the Slack (attachment), Discord/Teams (text), generic-JSON (`explanation` field), email, and console alerts. dbt runs feed upstream lineage from `manifest.json` into the prompt so cascading failures trace to the source model. Aggregate data only (anomaly strings, model names, timestamps — never warehouse rows); fail-open by contract: any API failure delivers the unaugmented alert with a one-line `(--explain unavailable: …)` note. Opt-in via `pip install scherlok[explain]` + `ANTHROPIC_API_KEY`. See [`src/scherlok/explainer/README.md`](src/scherlok/explainer/README.md). ([#58](https://github.com/rbmuller/scherlok/issues/58))
+
 ## [0.7.0] — 2026-05-28
 
 ### Added
