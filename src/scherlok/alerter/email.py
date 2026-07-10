@@ -17,7 +17,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from scherlok.detector.severity import Severity
-from scherlok.explainer import format_explanation_text, format_unavailable_note
+from scherlok.explainer import (
+    EXPLANATION_COLOR,
+    EXPLANATION_HEADER,
+    format_explanation_text,
+    format_unavailable_note,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +49,11 @@ def _explanation_html(explanation: dict | None, explain_note: str | None) -> str
             if steps
             else ""
         )
+        header = html.escape(EXPLANATION_HEADER)
         return (
             '<div style="margin-top:16px;padding:12px 16px;'
-            'border-left:4px solid #6b46c1;background:#faf5ff">'
-            '<p style="margin:0 0 8px"><strong>🧠 AI hypothesis</strong> '
-            '<span style="color:#64748b">(--explain)</span></p>'
+            f'border-left:4px solid {EXPLANATION_COLOR};background:#faf5ff">'
+            f'<p style="margin:0 0 8px"><strong>{header}</strong></p>'
             f'<p style="margin:0 0 8px">{summary}</p>'
             f'<p style="margin:0"><strong>Likely cause:</strong> {cause}</p>'
             f"{steps_block}"

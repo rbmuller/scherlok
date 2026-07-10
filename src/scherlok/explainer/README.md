@@ -27,6 +27,8 @@ The flag exists on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`.
    - **Generic JSON webhook** — a machine-readable `explanation` field
    - **Email** — a highlighted block under the anomaly table
    - **Console** — a panel under the anomaly table
+   - **`scherlok dbt --output json`** — an `explanation` key on the JSON
+     document (or `explanation_error` when the call failed)
 
 The response is forced through a tool call with a fixed schema, so the
 output always has the same three fields:
@@ -81,8 +83,12 @@ unaugmented alert is delivered as usual with a one-line note:
 (--explain unavailable: ANTHROPIC_API_KEY is not set)
 ```
 
-The alert path has a 30-second timeout and a single retry, so a degraded
-API can delay an alert by at most ~1 minute and can never suppress it.
+The alert path has a 15-second timeout and a single retry, so a degraded
+API can delay an alert by at most ~30 seconds and can never suppress it.
+Injected text is escaped and truncated per platform (Slack 3000-char
+section limit, Discord 2000-char content limit), and when the remaining
+budget is too small the hypothesis is dropped entirely — the original
+alert always wins.
 
 ## How to turn it off
 

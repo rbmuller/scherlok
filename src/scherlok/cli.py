@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from scherlok import __version__
@@ -21,7 +22,11 @@ from scherlok.connectors import get_connector
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
-from scherlok.explainer import HISTORY_LOOKBACK_DAYS, format_unavailable_note
+from scherlok.explainer import (
+    HISTORY_LOOKBACK_DAYS,
+    describe_error,
+    format_unavailable_note,
+)
 from scherlok.output import error as out_error
 from scherlok.output import info as out_info
 from scherlok.output import is_quiet, verbose_info
@@ -232,16 +237,18 @@ def _dispatch_alerts(
     *,
     explain: bool = False,
     explain_context: dict | None = None,
-) -> None:
+) -> tuple[dict | None, str | None]:
     """Persist anomalies and fan out to webhook/email alerters.
 
     With `explain`, one Claude call augments the whole batch with a
     root-cause hypothesis that rides along on every alert channel; when it
     fails, the unaugmented alert goes out with a one-line note instead.
+    Returns (explanation, explain_error) so callers with their own output
+    sink (e.g. `dbt --output json`) can embed the result.
     """
     if not anomalies:
         out_info("[green]No anomalies detected.[/green]")
-        return
+        return None, None
     explanation: dict | None = None
     explain_error: str | None = None
     if explain:
@@ -254,7 +261,9 @@ def _dispatch_alerts(
         if explanation:
             print_explanation(explanation)
     if explain_error:
-        out_error(f"[yellow]{format_unavailable_note(explain_error)}[/yellow]")
+        # rich_escape: error text may carry bracketed sequences that Rich
+        # would swallow as markup tags (or crash on) — e.g. 'scherlok[explain]'.
+        out_error(f"[yellow]{rich_escape(format_unavailable_note(explain_error))}[/yellow]")
     if webhook:
         ok = send_webhook(webhook, anomalies, explanation=explanation, explain_note=explain_error)
         if ok:
@@ -269,6 +278,7 @@ def _dispatch_alerts(
             verbose_info("Email delivered.")
         else:
             out_error("[red]Email delivery failed.[/red]")
+    return explanation, explain_error
 
 
 def _explain_or_note(
@@ -288,19 +298,21 @@ def _explain_or_note(
     try:
         history = store.get_anomaly_history(days=HISTORY_LOOKBACK_DAYS)
     except Exception as exc:  # fail-open: a history read must not block alerting
-        verbose_info(f"--explain: anomaly history unavailable ({exc})")
+        verbose_info(f"--explain: anomaly history unavailable ({rich_escape(str(exc))})")
         history = []
-    tables = {a["table"] for a in anomalies}
-    bundle = build_bundle(
-        anomalies,
-        recent_history=[h for h in history if h.get("table") in tables],
-        lineage=context.get("lineage"),
-        meta=context.get("meta"),
-    )
     try:
+        tables = {a.get("table") for a in anomalies}
+        bundle = build_bundle(
+            anomalies,
+            recent_history=[h for h in history if h.get("table") in tables],
+            lineage=context.get("lineage"),
+            meta=context.get("meta"),
+        )
         return explain_anomalies(bundle), None
     except ExplainUnavailableError as exc:
         return None, str(exc)
+    except Exception as exc:  # safety net — --explain must never block the alert
+        return None, describe_error(exc)
 
 
 def _explain_context(
@@ -714,7 +726,7 @@ def _dbt_impl(
                 _print_dbt_model_result(node, physical, current_vol, table_anomalies)
                 if show_lineage:
                     _print_lineage_block(lineage_graph, node.unique_id)
-        _dispatch_alerts(
+        explanation, explain_error = _dispatch_alerts(
             all_anomalies,
             store,
             webhook,
@@ -740,6 +752,12 @@ def _dbt_impl(
                 "warning": warn,
             },
         }
+        # Stdout is the only sink in json mode (console prints are quiet) —
+        # without this, a billed --explain hypothesis would be discarded.
+        if explanation:
+            payload["explanation"] = explanation
+        elif explain_error:
+            payload["explanation_error"] = explain_error
         print(json.dumps(payload))
     else:
         out_info(
@@ -956,29 +974,16 @@ def _enrich_anomalies_with_lineage(
         a["message"] = f"{msg}{suffix}"
 
 
-def _upstream_preview(
-    graph: dict[str, list[str]], unique_id: str, hops: int = 2
-) -> list[str]:
-    """Direct parents plus grandparents (2 hops) as display names, deduped.
+def _upstream_preview(graph: dict[str, list[str]], unique_id: str) -> list[str]:
+    """Ancestor display names, nearest first, for the explainer bundle.
 
-    Bounded on purpose: the explainer bundle needs likely-cause candidates,
-    not the full ancestry closure that `upstream_of` would return.
+    Delegates to lineage.upstream_of (BFS, cycle-safe); build_bundle caps
+    the list at MAX_LINEAGE_PARENTS, so nearest ancestors survive the cut.
     """
     from scherlok.dbt import display_name as _display_name
+    from scherlok.dbt import upstream_of as _upstream_of
 
-    seen: set[str] = set()
-    names: list[str] = []
-    frontier = list(graph.get(unique_id, []))
-    for _ in range(hops):
-        next_frontier: list[str] = []
-        for uid in frontier:
-            if uid in seen:
-                continue
-            seen.add(uid)
-            names.append(_display_name(uid))
-            next_frontier.extend(graph.get(uid, []))
-        frontier = next_frontier
-    return names
+    return [_display_name(uid) for uid in _upstream_of(graph, unique_id)]
 
 
 def _print_lineage_block(graph: dict[str, list[str]], unique_id: str) -> None:

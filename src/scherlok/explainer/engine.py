@@ -24,7 +24,7 @@ MODEL_ENV_VAR = "SCHERLOK_EXPLAIN_MODEL"
 API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 AUTH_TOKEN_ENV_VAR = "ANTHROPIC_AUTH_TOKEN"
 
-REQUEST_TIMEOUT_SECONDS = 30.0
+REQUEST_TIMEOUT_SECONDS = 15.0
 MAX_OUTPUT_TOKENS = 1024
 MAX_DIAGNOSTIC_STEPS = 3
 MAX_HISTORY_ENTRIES = 20
@@ -34,6 +34,7 @@ _MAX_ERROR_CHARS = 200
 
 EXPLANATION_TOOL_NAME = "record_explanation"
 EXPLANATION_HEADER = "🧠 AI hypothesis (--explain)"
+EXPLANATION_COLOR = "#6B46C1"
 UNAVAILABLE_NOTE_TEMPLATE = "(--explain unavailable: {error})"
 
 # A forced tool call is the structured-output mechanism that works on every
@@ -188,8 +189,13 @@ def explain_anomalies(bundle: dict) -> dict | None:
             messages=[{"role": "user", "content": _render_bundle(bundle)}],
         )
     except Exception as exc:
-        raise ExplainUnavailableError(_describe_error(exc)) from exc
-    return _parse_response(response)
+        raise ExplainUnavailableError(describe_error(exc)) from exc
+    try:
+        return _parse_response(response)
+    except ExplainUnavailableError:
+        raise
+    except Exception as exc:  # malformed response shapes (e.g. content=None)
+        raise ExplainUnavailableError(describe_error(exc)) from exc
 
 
 def _build_client() -> Any:
@@ -239,7 +245,8 @@ def _severity_name(severity: Any) -> str:
     return str(getattr(severity, "value", severity))
 
 
-def _describe_error(exc: Exception) -> str:
+def describe_error(exc: Exception) -> str:
+    """Bounded, operator-facing rendering of an exception for alert notes."""
     text = f"{type(exc).__name__}: {exc}".strip()
     if len(text) > _MAX_ERROR_CHARS:
         text = text[: _MAX_ERROR_CHARS - 1] + "…"
@@ -258,11 +265,13 @@ def _parse_response(response: Any) -> dict:
 
     summary = str(data.get("summary") or "").strip()
     likely_cause = str(data.get("likely_cause") or "").strip()
-    steps = [
-        str(s).strip()
-        for s in (data.get("diagnostic_steps") or [])
-        if str(s).strip()
-    ][:MAX_DIAGNOSTIC_STEPS]
+    steps_raw = data.get("diagnostic_steps") or []
+    if isinstance(steps_raw, str):
+        # Schema drift: a lone string must become one step, not per-char items.
+        steps_raw = [steps_raw]
+    elif not isinstance(steps_raw, list):
+        steps_raw = []
+    steps = [str(s).strip() for s in steps_raw if str(s).strip()][:MAX_DIAGNOSTIC_STEPS]
     if not summary or not likely_cause:
         raise ExplainUnavailableError("model returned an incomplete explanation")
     return {

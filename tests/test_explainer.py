@@ -370,6 +370,145 @@ class TestDispatchWiring:
         assert mock_webhook.call_args.kwargs["explanation"] is None
 
 
+# ----------------------------------------------- code-review regressions
+
+
+class TestFailOpenRegressions:
+    """The fail-open contract must hold against malformed inputs, malformed
+    API responses, and error text that collides with Rich markup."""
+
+    def test_anomaly_without_table_key_still_explains(self, fake_client, tmp_path):
+        store = ProfileStore(db_path=tmp_path / "profiles.db")
+        anomalies = [{"type": "x", "severity": Severity.INFO, "message": "m"}]
+        explanation, note = _explain_or_note(anomalies, store, None)
+        assert explanation == EXPLANATION
+        assert note is None
+
+    def test_malformed_api_response_content_becomes_note(self, monkeypatch, tmp_path):
+        client = MagicMock()
+        client.messages.create.return_value = _FakeResponse(None)  # content=None
+        monkeypatch.setattr(engine, "_build_client", lambda: client)
+        store = ProfileStore(db_path=tmp_path / "profiles.db")
+        explanation, note = _explain_or_note(_anomalies(), store, None)
+        assert explanation is None
+        assert "TypeError" in note
+
+    def test_unexpected_error_hits_the_safety_net(self, tmp_path):
+        store = ProfileStore(db_path=tmp_path / "profiles.db")
+        with patch("scherlok.explainer.build_bundle", side_effect=RuntimeError("boom")):
+            explanation, note = _explain_or_note(_anomalies(), store, None)
+        assert explanation is None
+        assert "RuntimeError: boom" in note
+
+    def test_note_with_rich_bracket_text_is_escaped(self, tmp_path):
+        store = ProfileStore(db_path=tmp_path / "profiles.db")
+        note = "pip install 'scherlok[explain]'"
+        with (
+            patch("scherlok.cli._explain_or_note", return_value=(None, note)),
+            patch("scherlok.cli.out_error") as mock_err,
+        ):
+            _dispatch_alerts(_anomalies(), store, None, None, explain=True)
+        printed = mock_err.call_args_list[0].args[0]
+        assert "\\[explain]" in printed  # bracket escaped, not eaten as markup
+
+    def test_note_with_closing_tag_does_not_crash_dispatch(self, tmp_path):
+        """A '[/x]' sequence used to raise rich MarkupError mid-dispatch."""
+        store = ProfileStore(db_path=tmp_path / "profiles.db")
+        with patch("scherlok.cli._explain_or_note", return_value=(None, "body [/x] tag")):
+            _dispatch_alerts(_anomalies(), store, None, None, explain=True)
+        assert len(store.get_anomaly_history(days=1)) == 2
+
+    def test_steps_as_string_becomes_single_step(self, monkeypatch):
+        tool_input = {**EXPLANATION, "diagnostic_steps": "Check dbt logs"}
+        client = _fake_client(tool_input=tool_input)
+        monkeypatch.setattr(engine, "_build_client", lambda: client)
+        result = explain_anomalies(build_bundle(_anomalies()))
+        assert result["diagnostic_steps"] == ["Check dbt logs"]
+
+    def test_dispatch_returns_explanation_for_json_sinks(self, fake_client, tmp_path):
+        store = ProfileStore(db_path=tmp_path / "profiles.db")
+        explanation, note = _dispatch_alerts(
+            _anomalies(), store, None, None, explain=True
+        )
+        assert explanation == EXPLANATION
+        assert note is None
+
+
+class TestPayloadLimitRegressions:
+    """Injected explanation text must never push a payload past platform
+    limits — an oversized payload rejects the WHOLE alert."""
+
+    def _huge_explanation(self):
+        return {
+            "summary": "s" * 2000,
+            "likely_cause": "c" * 2000,
+            "diagnostic_steps": ["x" * 500, "y" * 500, "z" * 500],
+        }
+
+    def test_slack_attachment_capped_at_section_limit(self):
+        from scherlok.alerter.webhook import (
+            SLACK_SECTION_TEXT_LIMIT,
+            _slack_explanation_attachment,
+        )
+
+        attachment = _slack_explanation_attachment(self._huge_explanation())
+        assert len(attachment["blocks"][0]["text"]["text"]) <= SLACK_SECTION_TEXT_LIMIT
+
+    def test_discord_content_never_exceeds_limit(self):
+        from scherlok.alerter.webhook import DISCORD_CONTENT_LIMIT, send_webhook
+
+        long_anomalies = [
+            {
+                "table": f"t{i}", "type": "volume_drop",
+                "severity": Severity.CRITICAL, "message": "m" * 120,
+            }
+            for i in range(14)
+        ]
+        with patch("scherlok.alerter.webhook.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            send_webhook(
+                "https://discord.com/api/webhooks/1/a",
+                long_anomalies,
+                explanation=self._huge_explanation(),
+            )
+            content = mock_post.call_args[1]["json"]["content"]
+        assert len(content) <= DISCORD_CONTENT_LIMIT
+
+    def test_discord_drops_explanation_before_truncating_alert(self):
+        """When the base alert already fills the budget, the explanation is
+        skipped entirely — the alert itself is never cut."""
+        from scherlok.alerter.webhook import _append_within_limit
+
+        base = "x" * 1990
+        assert _append_within_limit(base, "\n\nhypothesis", 2000) == base
+
+
+class TestEscapingRegressions:
+    def test_slack_escapes_model_output(self):
+        from scherlok.alerter.webhook import _slack_explanation_attachment
+
+        attachment = _slack_explanation_attachment(
+            {**EXPLANATION, "summary": "count < baseline & <!channel>"}
+        )
+        text = attachment["blocks"][0]["text"]["text"]
+        assert "&lt;!channel&gt;" in text
+        assert "count &lt; baseline &amp;" in text
+
+    def test_teams_escapes_model_output(self):
+        from scherlok.alerter.webhook import send_webhook
+
+        with patch("scherlok.alerter.webhook.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            send_webhook(
+                "https://outlook.office.com/webhook/x",
+                _anomalies(),
+                explanation={**EXPLANATION, "summary": "<script>alert(1)</script>"},
+            )
+            text = mock_post.call_args[1]["json"]["text"]
+        assert "&lt;script&gt;" in text
+        assert "<script>" not in text
+
+
 # ------------------------------------------------------------- CLI flags
 
 
@@ -388,7 +527,7 @@ class TestCliFlags:
 
 
 class TestUpstreamPreview:
-    def test_two_hops_deduped(self):
+    def test_nearest_ancestors_first_deduped(self):
         graph = {
             "model.p.child": ["model.p.parent_a", "model.p.parent_b"],
             "model.p.parent_a": ["model.p.grandparent"],
@@ -396,8 +535,11 @@ class TestUpstreamPreview:
             "model.p.grandparent": ["model.p.great_grandparent"],
         }
         names = _upstream_preview(graph, "model.p.child")
-        assert names == ["parent_a", "parent_b", "grandparent"]
-        assert "great_grandparent" not in names  # third hop excluded
+        assert names == ["parent_a", "parent_b", "grandparent", "great_grandparent"]
+
+    def test_cycle_does_not_list_model_as_its_own_upstream(self):
+        graph = {"model.p.a": ["model.p.b"], "model.p.b": ["model.p.a"]}
+        assert _upstream_preview(graph, "model.p.a") == ["b"]
 
     def test_unknown_node_is_empty(self):
         assert _upstream_preview({}, "model.p.ghost") == []
