@@ -62,7 +62,7 @@ Three commands. Five minutes. Done.
 | **Freshness alert** | Table hasn't updated in 12h (normally every 2h) | CRITICAL |
 | **Schema drift** | Column removed or type changed | CRITICAL |
 | **NULL surge** | NULL rate jumped from 2% to 45% | WARNING |
-| **Distribution shift** | Column mean shifted 5+ standard deviations | WARNING |
+| **Distribution shift** | Column mean shifted 3+ standard deviations (Shewhart-style control limit) | INFO, WARNING above 5σ |
 | **Cardinality explosion** | Status column went from 5 values to 500 | CRITICAL |
 
 Every anomaly is auto-scored: **INFO**, **WARNING**, or **CRITICAL**. No thresholds to configure.

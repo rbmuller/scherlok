@@ -37,10 +37,13 @@ def classify_freshness_miss() -> Severity:
 
 
 def classify_distribution_shift(z_score: float) -> Severity:
-    """Classify distribution shift based on z-score magnitude."""
-    abs_z = abs(z_score)
-    if abs_z > 5:
+    """Classify distribution shift based on z-score magnitude.
+
+    Detection starts at |z| > 3 (the classic Shewhart control limit,
+    enforced by the detector); 3-5 sigma classifies as INFO, beyond 5
+    sigma as WARNING. Deliberately never CRITICAL: a mean shift is a
+    symptom for a human to judge, not a CI-blocking failure on its own.
+    """
+    if abs(z_score) > 5:
         return Severity.WARNING
-    if abs_z > 3:
-        return Severity.INFO
     return Severity.INFO
