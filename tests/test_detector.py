@@ -146,6 +146,14 @@ class TestSeverityClassification:
     def test_distribution_shift_info(self):
         assert classify_distribution_shift(3.5) == Severity.INFO
 
+    def test_distribution_shift_negative_z_symmetric(self):
+        assert classify_distribution_shift(-6.0) == Severity.WARNING
+        assert classify_distribution_shift(-3.5) == Severity.INFO
+
+    def test_distribution_shift_never_critical(self):
+        """A mean shift alone must not gate CI — pinned by design."""
+        assert classify_distribution_shift(50.0) != Severity.CRITICAL
+
 
 class TestFreshnessDetector:
     """Tests for freshness anomaly detection."""
