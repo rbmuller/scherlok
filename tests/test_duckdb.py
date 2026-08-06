@@ -76,6 +76,13 @@ def test_list_tables(connector):
     assert connector.list_tables() == ["orders", "users"]
 
 
+def test_list_tables_includes_created_view(connector):
+    connector._conn.execute("CREATE TABLE users (id INTEGER)")
+    connector._conn.execute("CREATE VIEW active_users AS SELECT * FROM users")
+
+    assert connector.list_tables() == ["active_users", "users"]
+
+
 def test_get_row_count(connector):
     connector._conn.execute("CREATE TABLE orders (id INTEGER)")
     connector._conn.execute("INSERT INTO orders VALUES (1), (2), (3)")

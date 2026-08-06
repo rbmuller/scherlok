@@ -70,12 +70,12 @@ class MySQLConnector(BaseConnector):
         return self._conn.cursor()
 
     def list_tables(self) -> list[str]:
-        """List all base tables in the current database."""
+        """List all tables and views in the current database."""
         db = urlparse(self.connection_string).path.lstrip("/")
         with self._cursor() as cur:
             cur.execute(
                 "SELECT TABLE_NAME FROM information_schema.TABLES "
-                "WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = 'BASE TABLE' "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') "
                 "ORDER BY TABLE_NAME",
                 (db,),
             )

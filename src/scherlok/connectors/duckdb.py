@@ -63,10 +63,10 @@ class DuckDBConnector(BaseConnector):
         return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
 
     def list_tables(self) -> list[str]:
-        """List all base tables in the main schema."""
+        """List all tables and views in the main schema."""
         rows = self._conn.execute(
             "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main' AND table_type = 'BASE TABLE' "
+            "WHERE table_schema = 'main' AND table_type IN ('BASE TABLE', 'VIEW') "
             "ORDER BY table_name"
         ).fetchall()
         return [row[0] for row in rows]

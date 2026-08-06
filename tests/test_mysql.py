@@ -112,6 +112,22 @@ def test_list_tables(connector):
     assert "TABLE_TYPE" in sql
 
 
+def test_list_tables_includes_view_rows_from_mocked_information_schema(connector):
+    c, fake_conn = connector
+    _wire_cursor(fake_conn, fetchall=[
+        {"TABLE_NAME": "active_users", "TABLE_TYPE": "VIEW"},
+        {"TABLE_NAME": "users", "TABLE_TYPE": "BASE TABLE"},
+    ])
+
+    assert c.list_tables() == ["active_users", "users"]
+
+    execute_call = fake_conn.cursor().__enter__().execute.call_args
+    sql, params = execute_call.args
+    assert "'BASE TABLE'" in sql
+    assert "'VIEW'" in sql
+    assert params == ("testdb",)
+
+
 # ---------------------------------------------------------------------------
 # Test 4 — get_row_count issues COUNT(*) and returns integer
 # ---------------------------------------------------------------------------
