@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-10
+
+### Added
+- **dbt package** — Scherlok is now installable as a native dbt package via the dbt Package Hub (`package: rbmuller/scherlok`). Includes 4 instant tests (`not_null_proportion`, `row_count_between`, `recency`, `unique_proportion`) and 2 auto-learning anomaly detection tests (`volume_anomaly`, `null_anomaly`) backed by Shewhart control limits. Incremental `scherlok_metrics` and `scherlok_column_metrics` models auto-discover and profile all materialized models. One repo, two distribution channels (PyPI + dbt Hub). ([#64](https://github.com/rbmuller/scherlok/pull/64))
+
+### Fixed
+- **mcp 2.0 compatibility** — `FastMCP` was renamed to `MCPServer` in mcp 2.0. Import now tries v2 first, falls back to v1. ([#64](https://github.com/rbmuller/scherlok/pull/64))
+- **MySQL/DuckDB view discovery** — `list_tables()` now includes views alongside base tables, matching the behavior of Postgres, BigQuery, and Snowflake connectors. ([#63](https://github.com/rbmuller/scherlok/pull/63))
+
 ## [0.8.0] — 2026-07-10
 
 ### Added
