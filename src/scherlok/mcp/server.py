@@ -72,7 +72,7 @@ def _select(tables: list[str] | None, visible: list[str]) -> list[str]:
 
 # --------------------------------------------------------------------------
 # Tool implementations — plain functions so they're unit-testable without the
-# protocol layer. `build_server` registers them on a FastMCP instance.
+# protocol layer. `build_server` registers them on an MCPServer instance.
 # --------------------------------------------------------------------------
 
 def list_tables() -> dict[str, Any]:
@@ -206,21 +206,24 @@ _TOOLS = [list_tables, investigate, watch, status, history, check]
 
 
 def build_server() -> Any:
-    """Construct and return a FastMCP server with all tools registered.
+    """Construct and return an MCP server with all tools registered.
 
     Imported lazily so `pip install scherlok` (without the `[mcp]` extra)
     doesn't error on a missing `mcp` dependency until the server is built.
     """
     try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError as exc:  # pragma: no cover - exercised via packaging
-        raise ImportError(
-            "The MCP server requires the 'mcp' package, which ships with "
-            "scherlok by default. Re-install scherlok to pull it in: "
-            "pip install --upgrade scherlok"
-        ) from exc
+        from mcp.server import MCPServer as _Server
+    except ImportError:
+        try:
+            from mcp.server.fastmcp import FastMCP as _Server  # mcp <2.0
+        except ImportError as exc:
+            raise ImportError(
+                "The MCP server requires the 'mcp' package, which ships with "
+                "scherlok by default. Re-install scherlok to pull it in: "
+                "pip install --upgrade scherlok"
+            ) from exc
 
-    server = FastMCP(SERVER_NAME)
+    server = _Server(SERVER_NAME)
     for fn in _TOOLS:
         server.tool()(fn)
     return server
