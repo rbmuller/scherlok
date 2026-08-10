@@ -37,3 +37,9 @@ Thumbs.db
 # Scherlok local data
 docs/
 scripts/claude/tmp/
+
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml

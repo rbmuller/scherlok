@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: scherlok_metrics
+    description: >
+      Append-only log of row counts per model per dbt run.
+      Auto-discovers all materialized models in the project.
+      Used by the volume_anomaly test for statistical drift detection.
+    columns:
+      - name: table_name
+        description: Name of the monitored dbt model
+      - name: schema_name
+        description: Database schema where the model lives
+      - name: row_count
+        description: Row count at the time of measurement
+      - name: measured_at
+        description: Timestamp when the measurement was taken
+
+  - name: scherlok_column_metrics
+    description: >
+      Append-only log of per-column null rates for all monitored models.
+      Used by the null_anomaly test for statistical drift detection.
+    columns:
+      - name: table_name
+        description: Name of the monitored dbt model
+      - name: column_name
+        description: Name of the column
+      - name: column_type
+        description: Data type of the column
+      - name: total_rows
+        description: Total row count at time of measurement
+      - name: null_count
+        description: Number of NULL values in the column
+      - name: null_rate
+        description: Proportion of NULLs (0.0 to 1.0)
+      - name: measured_at
+        description: Timestamp when the measurement was taken

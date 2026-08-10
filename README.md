@@ -107,6 +107,43 @@ Or collapse both steps into one with the wrapper:
 
 📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
 
+## dbt Package — native tests
+
+Prefer staying inside dbt? Install Scherlok as a dbt package for native data quality tests — no Python CLI needed.
+
+```yaml
+# packages.yml
+packages:
+  - package: rbmuller/scherlok
+    version: [">=0.1.0", "<1.0.0"]
+```
+
+```yaml
+# schema.yml
+models:
+  - name: fct_orders
+    tests:
+      - scherlok.volume_anomaly:
+          sensitivity: 3.0
+      - scherlok.row_count_between:
+          min_value: 100
+    columns:
+      - name: email
+        tests:
+          - scherlok.not_null_proportion:
+              max_rate: 0.01
+      - name: updated_at
+        tests:
+          - scherlok.recency:
+              days: 2
+```
+
+**Tier 1 — Instant (no setup):** `not_null_proportion`, `row_count_between`, `recency`, `unique_proportion`
+
+**Tier 2 — Auto-learning (Shewhart control limits):** `volume_anomaly`, `null_anomaly` — require the `scherlok_metrics` model to build baseline history.
+
+📖 Full docs: [dbt package README →](models/_models.yml)
+
 ## HTML dashboard
 
 ![scherlok dashboard](assets/dashboard-screenshot.png)
