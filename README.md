@@ -103,6 +103,8 @@ Or collapse both steps into one with the wrapper:
 - run: scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
 ```
 
+Both `dbt` and `dbt-run-and-watch` accept `--output json` for CI parsers — a single JSON document on stdout, nothing else.
+
 **Supported adapters:** `postgres`, `bigquery`, `snowflake`, `mysql`, `duckdb`. For others, pass `--connection-string` explicitly.
 
 📖 Full docs: [dbt integration guide →](src/scherlok/dbt/README.md)
