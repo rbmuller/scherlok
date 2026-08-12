@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -819,6 +820,10 @@ def dbt_run_and_watch(
         "critical", "--fail-on",
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
+    output: str = typer.Option(
+        "text", "--output",
+        help="Output format: 'text' (default) or 'json' for CI parsers",
+    ),
     show_lineage: bool = typer.Option(
         False, "--show-lineage",
         help="After each model's result, print an ASCII tree of its upstream "
@@ -838,53 +843,85 @@ def dbt_run_and_watch(
 
     Example:
         scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
+        scherlok dbt-run-and-watch --project-dir . --target prod --output json
     """
-    dbt_bin = shutil.which("dbt")
-    if dbt_bin is None:
-        out_error(
-            "[red]`dbt` binary not found on PATH. Install dbt-core (or your adapter) "
-            "and re-run.[/red]"
+    output_lower = output.lower()
+    if output_lower not in ("text", "json"):
+        console.print(
+            f"[red]Invalid --output value '{output}'. Use 'text' or 'json'.[/red]"
         )
         raise typer.Exit(code=1)
+    json_mode = output_lower == "json"
 
-    cmd: list[str] = [dbt_bin, "run", "--project-dir", project_dir]
-    if profiles_dir:
-        cmd.extend(["--profiles-dir", profiles_dir])
-    if target:
-        cmd.extend(["--target", target])
-    for s in select or []:
-        cmd.extend(["--select", s])
+    from scherlok.output import is_quiet, is_verbose, set_stderr, set_verbosity
+    prev_quiet = is_quiet()
+    prev_verbose = is_verbose()
+    if json_mode:
+        # Keep stdout reserved for the JSON payload while preserving live logs.
+        set_stderr(True)
+        set_verbosity(quiet=True)
 
-    out_info(f"[bold]Running:[/bold] {' '.join(cmd)}")
-    # Stream stdout live so long dbt runs surface progress in CI logs.
-    # We don't capture output -- piping it through scherlok would buffer it.
-    completed = subprocess.run(cmd, check=False)
-    if completed.returncode != 0:
-        out_error(
-            f"[red]`dbt run` failed with exit code {completed.returncode}. "
-            f"Skipping scherlok watch (manifest may be stale).[/red]"
+    try:
+        dbt_bin = shutil.which("dbt")
+        if dbt_bin is None:
+            message = (
+                "`dbt` binary not found on PATH. Install dbt-core (or your adapter) "
+                "and re-run."
+            )
+            if json_mode:
+                print(json.dumps({"error": message, "exit_code": 1}))
+            else:
+                out_error(f"[red]{message}[/red]")
+            raise typer.Exit(code=1)
+
+        cmd: list[str] = [dbt_bin, "run", "--project-dir", project_dir]
+        if profiles_dir:
+            cmd.extend(["--profiles-dir", profiles_dir])
+        if target:
+            cmd.extend(["--target", target])
+        for s in select or []:
+            cmd.extend(["--select", s])
+
+        out_info(f"[bold]Running:[/bold] {' '.join(cmd)}")
+        # Stream dbt output live; JSON mode moves it to stderr so stdout stays parseable.
+        if json_mode:
+            completed = subprocess.run(cmd, check=False, stdout=sys.stderr)
+        else:
+            completed = subprocess.run(cmd, check=False)
+        if completed.returncode != 0:
+            message = (
+                f"`dbt run` failed with exit code {completed.returncode}. "
+                "Skipping scherlok watch (manifest may be stale)."
+            )
+            if json_mode:
+                print(json.dumps({"error": message, "exit_code": completed.returncode}))
+            else:
+                out_error(f"[red]{message}[/red]")
+            raise typer.Exit(code=completed.returncode)
+
+        out_info("[green]dbt run succeeded.[/green] Profiling materialized models...")
+        # Call the implementation function (not the Typer-decorated `dbt`) so the
+        # parameter defaults resolve to actual values instead of `OptionInfo`
+        # sentinels. Pass every kwarg explicitly; `_dbt_impl` is keyword-only.
+        _dbt_impl(
+            project_dir=project_dir,
+            profiles_dir=profiles_dir,
+            target=target,
+            connection_string=connection_string,
+            select=select,
+            include_sources=include_sources,
+            include_snapshots=include_snapshots,
+            webhook=webhook,
+            email=email or None,
+            fail_on=fail_on,
+            json_mode=json_mode,
+            show_lineage=show_lineage,
+            explain=explain,
         )
-        raise typer.Exit(code=completed.returncode)
-
-    out_info("[green]dbt run succeeded.[/green] Profiling materialized models...")
-    # Call the implementation function (not the Typer-decorated `dbt`) so the
-    # parameter defaults resolve to actual values instead of `OptionInfo`
-    # sentinels. Pass every kwarg explicitly; `_dbt_impl` is keyword-only.
-    _dbt_impl(
-        project_dir=project_dir,
-        profiles_dir=profiles_dir,
-        target=target,
-        connection_string=connection_string,
-        select=select,
-        include_sources=include_sources,
-        include_snapshots=include_snapshots,
-        webhook=webhook,
-        email=email or None,
-        fail_on=fail_on,
-        json_mode=False,
-        show_lineage=show_lineage,
-        explain=explain,
-    )
+    finally:
+        if json_mode:
+            set_stderr(False)
+            set_verbosity(verbose=prev_verbose, quiet=prev_quiet)
 
 
 def _resolve_physical_table(node: object, visible: set[str]) -> str | None:

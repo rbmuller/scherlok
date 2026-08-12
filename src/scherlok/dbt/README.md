@@ -88,6 +88,15 @@ If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one in
 
 The wrapper streams `dbt run` output live. If `dbt run` exits non-zero, the wrapper propagates the exit code and skips the watch (a stale or partial manifest would surface noise, not signal). `--project-dir`, `--target`, `--profiles-dir`, and `--select` are forwarded to `dbt run`; everything else stays scherlok-only.
 
+For parser-safe CI output, add `--output json`:
+
+```yaml
+- run: scherlok dbt-run-and-watch --project-dir . --target prod --output json
+```
+
+This emits the same JSON payload as `scherlok dbt --output json`. `dbt run`
+logs still stream live to stderr, while stdout contains only the JSON document.
+
 ## Lineage and downstream impact
 
 Scherlok reads `parent_map` from `manifest.json` to know each model's place in the DAG. Two features use it:
