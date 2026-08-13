@@ -865,10 +865,19 @@ def dbt_run_and_watch(
     try:
         dbt_bin = shutil.which("dbt")
         if dbt_bin is None:
-            out_error(
-                "[red]`dbt` binary not found on PATH. Install dbt-core (or your adapter) "
-                "and re-run.[/red]"
+            message = (
+                "`dbt` binary not found on PATH. Install dbt-core "
+                "(or your adapter) and re-run."
             )
+            if json_mode:
+                payload = {
+                    "project_dir": project_dir,
+                    "error": message,
+                    "returncode": 1,
+                }
+                print(json.dumps(payload))
+            else:
+                out_error(f"[red]{message}[/red]")
             raise typer.Exit(code=1)
 
         cmd: list[str] = [dbt_bin, "run", "--project-dir", project_dir]

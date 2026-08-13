@@ -283,6 +283,25 @@ def test_dbt_run_and_watch_json_mode_real_impl_emits_parseable_object(
     assert payload["summary"]["profiled"] == 4
 
 
+def test_dbt_run_and_watch_json_mode_dbt_not_found_emits_json_error():
+    """When dbt is not on PATH under --output json, stdout gets a JSON error document."""
+    with patch("scherlok.cli.shutil.which", return_value=None):
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(PG_PROJECT),
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["project_dir"] == str(PG_PROJECT)
+    assert "not found" in payload["error"]
+    assert payload["returncode"] == 1
+
+
 def test_dbt_run_and_watch_json_mode_dbt_run_failure_emits_json_error():
     """When `dbt run` fails under --output json, stdout gets a JSON error document
     instead of the plain-text message, so CI parsers never see two formats."""
