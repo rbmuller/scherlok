@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
@@ -16,6 +17,35 @@ PG_PROJECT = FIXTURES / "jaffle_shop_postgres"
 # CI terminals emit ANSI styling (bold/dim) even when colors are disabled;
 # strip them before substring assertions on Rich-rendered help text.
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _copy_project_with_run_results(
+    tmp_path: Path, results: list[dict[str, str]], *, include_snapshot: bool = False
+) -> Path:
+    """Copy the manifest fixture and replace its execution artifact."""
+    project_dir = tmp_path / "dbt_project"
+    target_dir = project_dir / "target"
+    target_dir.mkdir(parents=True)
+    manifest = json.loads((PG_PROJECT / "target" / "manifest.json").read_text())
+    if include_snapshot:
+        manifest["nodes"]["snapshot.jaffle_shop.orders_snapshot"] = {
+            "resource_type": "snapshot",
+            "name": "orders_snapshot",
+            "alias": "orders_snapshot",
+            "database": "jaffle_db",
+            "schema": "snapshots",
+            "relation_name": '"jaffle_db"."snapshots"."orders_snapshot"',
+            "config": {"materialized": "snapshot"},
+        }
+    (target_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (target_dir / "run_results.json").write_text(
+        json.dumps({"results": results}), encoding="utf-8"
+    )
+    return project_dir
+
+
+def _successful_result(unique_id: str, status: str = "success") -> dict[str, str]:
+    return {"unique_id": unique_id, "status": status}
 
 
 def test_dbt_run_and_watch_help():
@@ -96,6 +126,227 @@ def test_dbt_run_and_watch_passes_select_through_to_dbt():
     assert mock_impl.call_args.kwargs["select"] == ["stg_orders", "fct_orders"]
 
 
+@patch("scherlok.cli.get_connector")
+def test_dbt_run_and_watch_profiles_only_successful_models(
+    mock_get_connector, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project_dir = _copy_project_with_run_results(
+        tmp_path,
+        [
+            _successful_result("model.jaffle_shop.stg_customers"),
+            _successful_result("model.jaffle_shop.stg_orders", "error"),
+            _successful_result("model.jaffle_shop.fct_orders", "skipped"),
+        ],
+    )
+    fake_conn = MagicMock()
+    fake_conn.connect.return_value = True
+    fake_conn.list_tables.return_value = ["stg_customers", "stg_orders", "fct_orders"]
+    mock_get_connector.return_value = fake_conn
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._watch_table", return_value=([], {"row_count": 1})) as mock_watch:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert [call.args[2] for call in mock_watch.call_args_list] == ["stg_customers"]
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_run_and_watch_dbt_selector_is_not_reinterpreted(
+    mock_get_connector, tmp_path, monkeypatch
+):
+    """The artifact, not a non-literal selector, controls executed models."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project_dir = _copy_project_with_run_results(
+        tmp_path, [_successful_result("model.jaffle_shop.fct_orders")]
+    )
+    fake_conn = MagicMock()
+    fake_conn.connect.return_value = True
+    fake_conn.list_tables.return_value = ["fct_orders"]
+    mock_get_connector.return_value = fake_conn
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._watch_table", return_value=([], {"row_count": 1})) as mock_watch:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--connection-string", "postgresql://u:p@h/d",
+                "--select", "tag:orders",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert [call.args[2] for call in mock_watch.call_args_list] == ["fct_orders"]
+    cmd_args = fake_run.call_args.args[0]
+    assert "tag:orders" in cmd_args
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_run_and_watch_empty_execution_set_does_not_profile_manifest(
+    mock_get_connector, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project_dir = _copy_project_with_run_results(
+        tmp_path, [_successful_result("model.jaffle_shop.fct_orders", "error")]
+    )
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._watch_table") as mock_watch:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "No successfully executed dbt models" in result.output
+    mock_get_connector.assert_not_called()
+    mock_watch.assert_not_called()
+
+
+def test_dbt_run_and_watch_json_empty_execution_set_is_parseable(tmp_path):
+    project_dir = _copy_project_with_run_results(
+        tmp_path, [_successful_result("model.jaffle_shop.fct_orders", "no-op")]
+    )
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run):
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["models"] == []
+    assert payload["summary"] == {
+        "profiled": 0,
+        "anomalies": 0,
+        "critical": 0,
+        "warning": 0,
+    }
+
+
+@pytest.mark.parametrize("artifact_kind", ["missing", "malformed"])
+def test_dbt_run_and_watch_artifact_failure_skips_profiling(
+    tmp_path, artifact_kind
+):
+    project_dir = _copy_project_with_run_results(tmp_path, [])
+    artifact_path = project_dir / "target" / "run_results.json"
+    if artifact_kind == "missing":
+        artifact_path.unlink()
+    else:
+        artifact_path.write_text("{not json", encoding="utf-8")
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._dbt_impl") as mock_impl:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "run_results.json" in result.output
+    mock_impl.assert_not_called()
+
+
+def test_dbt_run_and_watch_json_artifact_failure_is_parseable(tmp_path):
+    project_dir = _copy_project_with_run_results(tmp_path, [])
+    (project_dir / "target" / "run_results.json").unlink()
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._dbt_impl") as mock_impl:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["returncode"] == 1
+    assert "run_results.json" in payload["error"]
+    mock_impl.assert_not_called()
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_run_and_watch_keeps_explicit_sources_and_snapshots(
+    mock_get_connector, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project_dir = _copy_project_with_run_results(
+        tmp_path,
+        [_successful_result("model.jaffle_shop.stg_customers")],
+        include_snapshot=True,
+    )
+    fake_conn = MagicMock()
+    fake_conn.connect.return_value = True
+    fake_conn.list_tables.return_value = ["stg_customers", "raw_payments", "orders_snapshot"]
+    mock_get_connector.return_value = fake_conn
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._watch_table", return_value=([], {"row_count": 1})) as mock_watch:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--connection-string", "postgresql://u:p@h/d",
+                "--include-sources",
+                "--include-snapshots",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert {call.args[2] for call in mock_watch.call_args_list} == {
+        "stg_customers", "raw_payments", "orders_snapshot"
+    }
+
+
 def test_dbt_run_and_watch_calls_scherlok_dbt_on_success():
     """When `dbt run` succeeds, `_dbt_impl` must be invoked with all required flags."""
     fake_run = MagicMock()
@@ -127,10 +378,16 @@ def test_dbt_run_and_watch_calls_scherlok_dbt_on_success():
     # at runtime. Locking these in here so a future regression surfaces.
     for required in (
         "profiles_dir", "select", "include_sources", "include_snapshots",
-        "webhook", "email", "json_mode", "show_lineage",
+        "webhook", "email", "json_mode", "show_lineage", "executed_model_ids",
     ):
         assert required in kwargs, f"_dbt_impl call missing kwarg: {required}"
     assert kwargs["json_mode"] is False  # default --output is 'text'
+    assert kwargs["executed_model_ids"] == {
+        "model.jaffle_shop.stg_customers",
+        "model.jaffle_shop.stg_orders",
+        "model.jaffle_shop.fct_orders",
+        "model.jaffle_shop.dim_customers_inc",
+    }
 
 
 @patch("scherlok.cli.get_connector")

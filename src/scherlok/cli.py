@@ -617,6 +617,7 @@ def _dbt_impl(
     json_mode: bool,
     show_lineage: bool = False,
     explain: bool = False,
+    executed_model_ids: set[str] | None = None,
 ) -> None:
     """The actual dbt-command body. Extracted so the `dbt()` entry point can
     wrap it in a try/finally that restores the shared output console after
@@ -642,18 +643,55 @@ def _dbt_impl(
 
     adapter = manifest.get("metadata", {}).get("adapter_type", "?")
     nodes: list[DbtNode] = discover_models(manifest, include_snapshots=include_snapshots)
+    if executed_model_ids is not None:
+        nodes = [
+            node
+            for node in nodes
+            if node.resource_type != "model" or node.unique_id in executed_model_ids
+        ]
     if include_sources:
         nodes.extend(discover_sources(manifest))
 
     if select:
         wanted = set(select)
-        nodes = [n for n in nodes if n.name in wanted or n.identifier in wanted]
-        if not nodes:
+        if executed_model_ids is None:
+            nodes = [n for n in nodes if n.name in wanted or n.identifier in wanted]
+        else:
+            # dbt already expanded the selector. Keep model nodes from the
+            # artifact and retain literal matching for explicitly included
+            # sources/snapshots.
+            nodes = [
+                n
+                for n in nodes
+                if n.resource_type == "model" or n.name in wanted or n.identifier in wanted
+            ]
+        if not nodes and executed_model_ids is None:
             console.print(f"[red]No models matched --select {list(wanted)}.[/red]")
             raise typer.Exit(code=1)
 
     if not nodes:
-        console.print("[yellow]No materialized models found in manifest.[/yellow]")
+        if executed_model_ids is not None:
+            message = "No successfully executed dbt models found in run_results.json."
+            if json_mode:
+                print(
+                    json.dumps(
+                        {
+                            "project_dir": project_dir,
+                            "adapter": adapter,
+                            "models": [],
+                            "summary": {
+                                "profiled": 0,
+                                "anomalies": 0,
+                                "critical": 0,
+                                "warning": 0,
+                            },
+                        }
+                    )
+                )
+            else:
+                out_info(f"[yellow]{message}[/yellow]")
+        else:
+            console.print("[yellow]No materialized models found in manifest.[/yellow]")
         raise typer.Exit(code=0)
 
     # 2. Resolve connection string
@@ -912,7 +950,27 @@ def dbt_run_and_watch(
                 )
             raise typer.Exit(code=completed.returncode)
 
-        out_info("[green]dbt run succeeded.[/green] Profiling materialized models...")
+        out_info("[green]dbt run succeeded.[/green] Reading execution results...")
+        from scherlok.dbt import load_run_results, successful_model_unique_ids
+
+        try:
+            run_results = load_run_results(project_dir)
+            executed_model_ids = successful_model_unique_ids(run_results)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            message = (
+                "`dbt run` succeeded, but its run_results.json artifact could not be "
+                f"used: {exc}"
+            )
+            if json_mode:
+                print(
+                    json.dumps(
+                        {"project_dir": project_dir, "error": message, "returncode": 1}
+                    )
+                )
+            else:
+                out_error(f"[red]{message}[/red]")
+            raise typer.Exit(code=1) from exc
+
         # Call the implementation function (not the Typer-decorated `dbt`) so the
         # parameter defaults resolve to actual values instead of `OptionInfo`
         # sentinels. Pass every kwarg explicitly; `_dbt_impl` is keyword-only.
@@ -930,6 +988,7 @@ def dbt_run_and_watch(
             json_mode=json_mode,
             show_lineage=show_lineage,
             explain=explain,
+            executed_model_ids=executed_model_ids,
         )
     finally:
         if json_mode:

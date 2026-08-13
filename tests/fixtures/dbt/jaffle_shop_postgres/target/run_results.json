@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v5.json",
+    "dbt_version": "1.8.0"
+  },
+  "results": [
+    {
+      "unique_id": "model.jaffle_shop.stg_customers",
+      "status": "success"
+    },
+    {
+      "unique_id": "model.jaffle_shop.stg_orders",
+      "status": "success"
+    },
+    {
+      "unique_id": "model.jaffle_shop.fct_orders",
+      "status": "success"
+    },
+    {
+      "unique_id": "model.jaffle_shop.dim_customers_inc",
+      "status": "success"
+    }
+  ]
+}

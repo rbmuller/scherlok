@@ -86,7 +86,9 @@ If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one in
     scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
 ```
 
-The wrapper streams `dbt run` output live. If `dbt run` exits non-zero, the wrapper propagates the exit code and skips the watch (a stale or partial manifest would surface noise, not signal). `--project-dir`, `--target`, `--profiles-dir`, and `--select` are forwarded to `dbt run`; everything else stays scherlok-only.
+The wrapper streams `dbt run` output live. If `dbt run` exits non-zero, the wrapper propagates the exit code and skips the watch (a stale or partial manifest would surface noise, not signal). After a successful run, it reads that invocation's `target/run_results.json` and profiles only successfully built model nodes. `--project-dir`, `--target`, `--profiles-dir`, and `--select` are forwarded to `dbt run`; everything else stays scherlok-only.
+
+If `run_results.json` is missing or malformed after a successful `dbt run`, the wrapper fails clearly instead of falling back to every model in the manifest. `--include-sources` and `--include-snapshots` remain explicit opt-ins and are not inferred from model execution results.
 
 The wrapper also accepts `--output json`, matching `scherlok dbt --output json`:
 

@@ -14,6 +14,7 @@ from scherlok.dbt.lineage import (
 )
 from scherlok.dbt.manifest import DbtNode, discover_models, discover_sources, load_manifest
 from scherlok.dbt.profiles import ProfileResolutionError, resolve_connection_string
+from scherlok.dbt.run_results import load_run_results, successful_model_unique_ids
 
 __all__ = [
     "DbtNode",
@@ -25,7 +26,9 @@ __all__ = [
     "downstream_of",
     "invert_graph",
     "load_manifest",
+    "load_run_results",
     "render_lineage_tree",
     "resolve_connection_string",
+    "successful_model_unique_ids",
     "upstream_of",
 ]
