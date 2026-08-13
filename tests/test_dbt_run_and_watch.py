@@ -1,5 +1,6 @@
 """Tests for `scherlok dbt-run-and-watch` CLI command."""
 
+import json
 import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -129,7 +130,7 @@ def test_dbt_run_and_watch_calls_scherlok_dbt_on_success():
         "webhook", "email", "json_mode", "show_lineage",
     ):
         assert required in kwargs, f"_dbt_impl call missing kwarg: {required}"
-    assert kwargs["json_mode"] is False  # wrapper always runs the human-readable path
+    assert kwargs["json_mode"] is False  # default --output is 'text'
 
 
 @patch("scherlok.cli.get_connector")
@@ -175,3 +176,153 @@ def test_dbt_run_and_watch_real_dbt_impl_path(mock_get_connector, tmp_path, monk
     # keyword-only contract is intact end-to-end.
     assert result.exit_code == 0, result.output
     assert mock_watch.call_count == 4  # 4 materialized models in the fixture
+
+
+def test_dbt_run_and_watch_output_invalid_value_rejected():
+    """Unknown --output values exit 1 with a clear message, mirroring `scherlok dbt`."""
+    result = runner.invoke(
+        app,
+        [
+            "dbt-run-and-watch",
+            "--project-dir", str(PG_PROJECT),
+            "--output", "yaml",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Invalid --output" in result.output
+
+
+def test_dbt_run_and_watch_json_mode_passes_json_mode_to_dbt_impl():
+    """--output json must flip `_dbt_impl`'s json_mode, unlike the default text path."""
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._dbt_impl") as mock_impl:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_impl.call_count == 1
+    assert mock_impl.call_args.kwargs["json_mode"] is True
+    # dbt run's own stdout must be rerouted away from the inherited stdout fd
+    # (CliRunner swaps in its own sys.stderr during invoke, so we can't compare
+    # identity against sys.stderr here -- absence of the default is the signal),
+    # so it can never land on the stdout channel reserved for the JSON payload.
+    assert fake_run.call_args.kwargs["stdout"] is not None
+
+
+def test_dbt_run_and_watch_json_mode_text_mode_leaves_dbt_stdout_inherited():
+    """Without --output json, dbt run's stdout must stream normally (not rerouted)."""
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._dbt_impl"):
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert fake_run.call_args.kwargs["stdout"] is None
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_run_and_watch_json_mode_real_impl_emits_parseable_object(
+    mock_get_connector, tmp_path, monkeypatch
+):
+    """End-to-end: --output json produces the same JSON shape as `scherlok dbt --output json`,
+    with no Rich chatter (`Running:`, `dbt run succeeded`) leaking onto stdout."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    fake_conn = MagicMock()
+    fake_conn.connect.return_value = True
+    fake_conn.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake_conn
+
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.return_value = ([], {"row_count": 1})
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@h/d",
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Running:" not in result.stdout
+    assert "dbt run succeeded" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["project_dir"] == str(PG_PROJECT)
+    assert payload["adapter"] == "postgres"
+    assert len(payload["models"]) == 4
+    assert payload["summary"]["profiled"] == 4
+
+
+def test_dbt_run_and_watch_json_mode_dbt_not_found_emits_json_error():
+    """When dbt is not on PATH under --output json, stdout gets a JSON error document."""
+    with patch("scherlok.cli.shutil.which", return_value=None):
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(PG_PROJECT),
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["project_dir"] == str(PG_PROJECT)
+    assert "not found" in payload["error"]
+    assert payload["returncode"] == 1
+
+
+def test_dbt_run_and_watch_json_mode_dbt_run_failure_emits_json_error():
+    """When `dbt run` fails under --output json, stdout gets a JSON error document
+    instead of the plain-text message, so CI parsers never see two formats."""
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 2
+
+    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
+         patch("scherlok.cli.subprocess.run", fake_run), \
+         patch("scherlok.cli._dbt_impl") as mock_impl:
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(PG_PROJECT),
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 2
+    assert mock_impl.call_count == 0  # scherlok dbt did NOT run
+    payload = json.loads(result.stdout)
+    assert payload["project_dir"] == str(PG_PROJECT)
+    assert payload["error"] == "dbt run failed"
+    assert payload["returncode"] == 2
