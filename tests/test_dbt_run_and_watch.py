@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
+from scherlok.dbt.run_results import _validated_results
 
 runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "dbt"
@@ -146,9 +147,14 @@ def test_dbt_run_and_watch_profiles_only_successful_models(
     fake_run = MagicMock()
     fake_run.return_value.returncode = 0
 
-    with patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"), \
-         patch("scherlok.cli.subprocess.run", fake_run), \
-         patch("scherlok.cli._watch_table", return_value=([], {"row_count": 1})) as mock_watch:
+    with (
+        patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"),
+        patch("scherlok.cli.subprocess.run", fake_run),
+        patch("scherlok.cli._watch_table", return_value=([], {"row_count": 1})) as mock_watch,
+        patch(
+            "scherlok.dbt.run_results._validated_results", wraps=_validated_results
+        ) as mock_validate,
+    ):
         result = runner.invoke(
             app,
             [
@@ -160,6 +166,7 @@ def test_dbt_run_and_watch_profiles_only_successful_models(
 
     assert result.exit_code == 0, result.output
     assert [call.args[2] for call in mock_watch.call_args_list] == ["stg_customers"]
+    assert mock_validate.call_count == 1
 
 
 @patch("scherlok.cli.get_connector")

@@ -951,11 +951,14 @@ def dbt_run_and_watch(
             raise typer.Exit(code=completed.returncode)
 
         out_info("[green]dbt run succeeded.[/green] Reading execution results...")
-        from scherlok.dbt import load_run_results, successful_model_unique_ids
+        from scherlok.dbt import load_run_results
+        from scherlok.dbt.run_results import _successful_model_unique_ids_from_validated
 
         try:
             run_results = load_run_results(project_dir)
-            executed_model_ids = successful_model_unique_ids(run_results)
+            executed_model_ids = _successful_model_unique_ids_from_validated(
+                run_results["results"]
+            )
         except (FileNotFoundError, OSError, ValueError) as exc:
             message = (
                 "`dbt run` succeeded, but its run_results.json artifact could not be "
