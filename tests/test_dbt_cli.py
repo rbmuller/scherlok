@@ -27,6 +27,22 @@ def test_dbt_missing_manifest():
     assert "manifest.json not found" in result.output
 
 
+def test_dbt_output_json_missing_manifest_keeps_stdout_clean(tmp_path):
+    """A missing manifest error is routed to stderr in JSON mode."""
+    result = runner.invoke(
+        app,
+        [
+            "dbt",
+            "--project-dir", str(tmp_path / "missing-project"),
+            "--output", "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "manifest.json not found" in result.stderr
+
+
 def test_dbt_select_filter_no_match():
     """--select with a name that doesn't exist exits with a clear error."""
     result = runner.invoke(
@@ -40,6 +56,103 @@ def test_dbt_select_filter_no_match():
     )
     assert result.exit_code == 1
     assert "No models matched" in result.output
+
+
+def test_dbt_output_json_select_filter_no_match_keeps_stdout_clean():
+    """An unmatched --select error is routed to stderr in JSON mode."""
+    result = runner.invoke(
+        app,
+        [
+            "dbt",
+            "--project-dir", str(PG_PROJECT),
+            "--connection-string", "postgresql://u:p@host/db",
+            "--select", "ghost_model",
+            "--output", "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "No models matched" in result.stderr
+
+
+def test_dbt_output_json_no_materialized_models_keeps_stdout_clean(tmp_path):
+    """A manifest without physical models warns on stderr but still exits 0."""
+    project_dir = tmp_path / "project"
+    target_dir = project_dir / "target"
+    target_dir.mkdir(parents=True)
+    (target_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "metadata": {
+                    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+                    "adapter_type": "postgres",
+                },
+                "nodes": {
+                    "model.demo.ephemeral": {
+                        "resource_type": "model",
+                        "name": "ephemeral",
+                        "config": {"materialized": "ephemeral"},
+                    }
+                },
+                "sources": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["dbt", "--project-dir", str(project_dir), "--output", "json"],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert "No materialized models found" in result.stderr
+
+
+def test_dbt_output_json_profile_resolution_failure_keeps_stdout_clean(tmp_path):
+    """A profile-resolution error is routed to stderr in JSON mode."""
+    result = runner.invoke(
+        app,
+        [
+            "dbt",
+            "--project-dir", str(PG_PROJECT),
+            "--profiles-dir", str(tmp_path / "missing-profiles"),
+            "--output", "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "profiles.yml not found" in result.stderr
+
+
+@patch("scherlok.cli.get_connector")
+def test_dbt_output_json_connector_failure_keeps_stdout_clean(
+    mock_get_connector, tmp_path, monkeypatch
+):
+    """Connector failure output, including last_error, is routed to stderr."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake = MagicMock()
+    fake.connect.return_value = False
+    fake.last_error = "connection refused: test database"
+    mock_get_connector.return_value = fake
+
+    result = runner.invoke(
+        app,
+        [
+            "dbt",
+            "--project-dir", str(PG_PROJECT),
+            "--connection-string", "postgresql://u:p@host/db",
+            "--output", "json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Failed to connect to the database." in result.stderr
+    assert "connection refused: test database" in result.stderr
 
 
 @patch("scherlok.cli.get_connector")
