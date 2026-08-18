@@ -88,10 +88,10 @@ def _get_connector_or_exit() -> object:
 
 def _print_connect_failure(connector: object) -> None:
     """Render a 'failed to connect' header plus connector.last_error if available."""
-    console.print("[red]Failed to connect to the database.[/red]")
+    out_error("[red]Failed to connect to the database.[/red]")
     err = getattr(connector, "last_error", None)
     if err:
-        console.print(f"  [dim]{err}[/dim]")
+        out_error(f"  [dim]{err}[/dim]")
 
 
 CONNECT_EXAMPLES: list[tuple[str, str]] = [
@@ -638,7 +638,7 @@ def _dbt_impl(
     try:
         manifest = load_manifest(project_dir)
     except (FileNotFoundError, ValueError) as exc:
-        console.print(f"[red]{exc}[/red]")
+        out_error(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
     adapter = manifest.get("metadata", {}).get("adapter_type", "?")
@@ -666,7 +666,7 @@ def _dbt_impl(
                 if n.resource_type == "model" or n.name in wanted or n.identifier in wanted
             ]
         if not nodes and executed_model_ids is None:
-            console.print(f"[red]No models matched --select {list(wanted)}.[/red]")
+            out_error(f"[red]No models matched --select {list(wanted)}.[/red]")
             raise typer.Exit(code=1)
 
     if not nodes:
@@ -691,7 +691,7 @@ def _dbt_impl(
             else:
                 out_info(f"[yellow]{message}[/yellow]")
         else:
-            console.print("[yellow]No materialized models found in manifest.[/yellow]")
+            out_error("[yellow]No materialized models found in manifest.[/yellow]")
         raise typer.Exit(code=0)
 
     # 2. Resolve connection string
@@ -703,7 +703,7 @@ def _dbt_impl(
                 project_dir, profiles_dir=profiles_dir, target=target
             )
         except ProfileResolutionError as exc:
-            console.print(f"[red]{exc}[/red]")
+            out_error(f"[red]{exc}[/red]")
             raise typer.Exit(code=1) from exc
 
     cfg = ScherlokConfig.load()
