@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from scherlok.cli import app
+from scherlok.cli import _enrich_anomalies_with_lineage, app
+from scherlok.dbt.manifest import DbtExposure
 
 runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "dbt"
@@ -295,6 +296,10 @@ def test_dbt_output_json_emits_parseable_object(mock_get_connector, tmp_path, mo
     assert set(first.keys()) >= {"name", "physical", "resource_type", "row_count", "anomalies"}
     assert first["anomalies"][0]["severity"] == "CRITICAL"
     assert first["anomalies"][0]["type"] == "volume_drop"
+    first_message = first["anomalies"][0]["message"]
+    assert "Affects 2 downstream models: fct_orders, dim_customers_inc" in first_message
+    assert "Downstream exposure: Revenue Dashboard" in first_message
+    assert "analytics-team@company.com" in first_message
     summary = payload["summary"]
     assert set(summary.keys()) >= {"profiled", "anomalies", "critical", "warning"}
     assert summary["profiled"] == 4
@@ -456,8 +461,130 @@ def test_dbt_anomaly_message_enriched_with_downstream(mock_get_connector, tmp_pa
     assert result.exit_code == 1
     # Message must be enriched in place (so alerter payloads carry the same info)
     assert "Affects" in anomaly["message"]
-    assert "downstream model" in anomaly["message"]
+    assert "Affects 2 downstream models: fct_orders, dim_customers_inc" in anomaly["message"]
+    assert (
+        "Downstream exposure: Revenue Dashboard (owner: analytics-team@company.com)"
+        in anomaly["message"]
+    )
     assert "fct_orders" in anomaly["message"]
+    assert "unique_stg_customers_id" not in anomaly["message"]
+
+
+def test_dbt_anomaly_message_uses_exposure_name_and_owner_name_fallback():
+    from scherlok.detector.severity import Severity
+
+    anomaly = {
+        "table": "source_table",
+        "severity": Severity.WARNING,
+        "type": "volume_drop",
+        "message": "Row count dropped",
+    }
+    graph = {
+        "model.demo.source": [],
+        "test.demo.validation": ["model.demo.source"],
+        "exposure.demo.dashboard": ["test.demo.validation"],
+    }
+    exposure = DbtExposure(
+        unique_id="exposure.demo.dashboard",
+        name="dashboard",
+        label=None,
+        exposure_type="dashboard",
+        owner_name="Analytics Team",
+        owner_emails=(),
+    )
+
+    _enrich_anomalies_with_lineage(
+        [anomaly], "model.demo.source", graph, [exposure]
+    )
+
+    assert anomaly["message"] == (
+        "Row count dropped · Downstream exposure: dashboard (owner: Analytics Team)"
+    )
+    assert "validation" not in anomaly["message"]
+
+
+def test_dbt_anomaly_message_bounds_multiple_exposures_and_renders_emails():
+    from scherlok.detector.severity import Severity
+
+    source_id = "model.demo.source"
+    exposure_ids = [f"exposure.demo.dashboard_{i}" for i in range(4)]
+    graph = {source_id: []}
+    for exposure_id in exposure_ids:
+        graph[exposure_id] = [source_id]
+    exposures = [
+        DbtExposure(
+            unique_id=exposure_id,
+            name=exposure_id.rsplit(".", 1)[-1],
+            label=f"Dashboard {i}",
+            exposure_type="dashboard",
+            owner_name=None,
+            owner_emails=(f"owner{i}@example.com", f"backup{i}@example.com"),
+        )
+        for i, exposure_id in enumerate(exposure_ids)
+    ]
+    anomaly = {
+        "table": "source_table",
+        "severity": Severity.CRITICAL,
+        "type": "volume_drop",
+        "message": "Row count dropped",
+    }
+
+    _enrich_anomalies_with_lineage([anomaly], source_id, graph, exposures)
+
+    expected = (
+        "Downstream exposures: Dashboard 0 (owner: owner0@example.com, backup0@example.com), "
+        "Dashboard 1 (owner: owner1@example.com, backup1@example.com), "
+        "Dashboard 2 (owner: owner2@example.com, backup2@example.com) (+1 more)"
+    )
+    assert expected in anomaly["message"]
+    assert "Dashboard 3" not in anomaly["message"]
+
+
+@patch("scherlok.cli.get_connector")
+@patch("scherlok.cli.send_webhook")
+@patch("scherlok.cli.send_email_alert")
+def test_dbt_enriched_message_reaches_existing_alert_sinks(
+    mock_send_email, mock_send_webhook, mock_get_connector, tmp_path, monkeypatch
+):
+    from scherlok.detector.severity import Severity
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake = MagicMock()
+    fake.connect.return_value = True
+    fake.list_tables.return_value = [
+        "stg_customers", "stg_orders", "fct_orders", "dim_customers_inc",
+    ]
+    mock_get_connector.return_value = fake
+    anomaly = {
+        "table": "stg_customers",
+        "severity": Severity.CRITICAL,
+        "type": "volume_drop",
+        "message": "Row count dropped 60%",
+    }
+
+    with patch("scherlok.cli._watch_table") as mock_watch:
+        mock_watch.side_effect = [
+            ([anomaly], {"row_count": 40}),
+            ([], {"row_count": 100}),
+            ([], {"row_count": 200}),
+            ([], {"row_count": 300}),
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "dbt",
+                "--project-dir", str(PG_PROJECT),
+                "--connection-string", "postgresql://u:p@host/db",
+                "--webhook", "https://alerts.example.com/hook",
+                "--email", "on-call@example.com",
+            ],
+        )
+
+    assert result.exit_code == 1
+    webhook_anomalies = mock_send_webhook.call_args.args[1]
+    email_anomalies = mock_send_email.call_args.args[1]
+    assert webhook_anomalies[0]["message"] == anomaly["message"]
+    assert email_anomalies[0]["message"] == anomaly["message"]
 
 
 @patch("scherlok.cli.get_connector")

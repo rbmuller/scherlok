@@ -110,6 +110,18 @@
       "relation_name": "\"jaffle_db\".\"raw\".\"raw_payments\""
     }
   },
+  "exposures": {
+    "exposure.jaffle_shop.revenue_dashboard": {
+      "resource_type": "exposure",
+      "name": "revenue_dashboard",
+      "label": "Revenue Dashboard",
+      "type": "dashboard",
+      "owner": {
+        "name": "Analytics Team",
+        "email": "analytics-team@company.com"
+      }
+    }
+  },
   "parent_map": {
     "model.jaffle_shop.stg_customers": [
       "seed.jaffle_shop.raw_customers"
@@ -130,6 +142,9 @@
     "test.jaffle_shop.unique_stg_customers_id.abc123": [
       "model.jaffle_shop.stg_customers"
     ],
+    "exposure.jaffle_shop.revenue_dashboard": [
+      "model.jaffle_shop.dim_customers_inc"
+    ],
     "seed.jaffle_shop.raw_customers": [],
     "source.jaffle_shop.raw.payments": []
   },
@@ -146,8 +161,11 @@
       "model.jaffle_shop.fct_orders"
     ],
     "model.jaffle_shop.fct_orders": [],
-    "model.jaffle_shop.dim_customers_inc": [],
+    "model.jaffle_shop.dim_customers_inc": [
+      "exposure.jaffle_shop.revenue_dashboard"
+    ],
     "test.jaffle_shop.unique_stg_customers_id.abc123": [],
+    "exposure.jaffle_shop.revenue_dashboard": [],
     "seed.jaffle_shop.raw_customers": [
       "model.jaffle_shop.stg_customers"
     ],

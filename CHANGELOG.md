@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`scherlok dbt-run-and-watch --output json`** — the wrapper now accepts the same `--output json` flag as `scherlok dbt`, so CI users get the wrapper's convenience and a machine-readable stdout payload in one step. `dbt run`'s own stdout is rerouted to stderr in JSON mode so it never mixes with the payload; if `dbt run` fails, stdout gets a small JSON error document (`project_dir`, `error`, `returncode`) instead of plain text. ([#47](https://github.com/rbmuller/scherlok/issues/47))
 - **Targeted `dbt-run-and-watch` profiling** — after a successful `dbt run`, the wrapper reads `target/run_results.json` and profiles only successful model nodes from that invocation. Missing or malformed artifacts fail clearly rather than falling back to the full manifest. ([#69](https://github.com/rbmuller/scherlok/issues/69))
+- **Exposure-aware dbt lineage in anomaly alerts** — downstream models remain identified separately from dbt exposures, whose labels and owner information are surfaced in the existing alert message without changing notification routing. ([#70](https://github.com/rbmuller/scherlok/issues/70))
 
 ## [0.9.0] — 2026-08-10
 

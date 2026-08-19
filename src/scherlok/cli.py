@@ -1,12 +1,16 @@
 """CLI entry point for Scherlok. Built with Typer and Rich."""
 
+from __future__ import annotations
+
 import json
 import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -38,6 +42,10 @@ from scherlok.profiler.volume import profile_volume
 from scherlok.service import profile_and_detect
 from scherlok.store.remote import sync_context
 from scherlok.store.sqlite import ProfileStore
+
+if TYPE_CHECKING:
+    from scherlok.dbt.manifest import DbtExposure
+
 
 app = typer.Typer(
     name="scherlok",
@@ -628,6 +636,7 @@ def _dbt_impl(
         DbtNode,
         ProfileResolutionError,
         build_dependency_graph,
+        discover_exposures,
         discover_models,
         discover_sources,
         load_manifest,
@@ -740,6 +749,7 @@ def _dbt_impl(
 
     # 4. Build lineage graph once for downstream enrichment + --show-lineage
     lineage_graph = build_dependency_graph(manifest)
+    exposures = discover_exposures(manifest)
 
     # 5. Per-model investigate + watch
     from scherlok.config import PROFILES_DB
@@ -753,7 +763,9 @@ def _dbt_impl(
             # Enrich each anomaly's message with downstream-impact info so the
             # downstream context follows the anomaly through prints, JSON, and
             # alerter payloads alike.
-            _enrich_anomalies_with_lineage(table_anomalies, node.unique_id, lineage_graph)
+            _enrich_anomalies_with_lineage(
+                table_anomalies, node.unique_id, lineage_graph, exposures
+            )
             all_anomalies.extend(table_anomalies)
             if explain and table_anomalies:
                 # Upstream parents feed the explainer bundle: broken parents
@@ -1059,14 +1071,16 @@ def _print_dbt_model_result(
 
 
 def _enrich_anomalies_with_lineage(
-    anomalies: list[dict], unique_id: str, graph: dict[str, list[str]]
+    anomalies: list[dict],
+    unique_id: str,
+    graph: dict[str, list[str]],
+    exposures: list[DbtExposure] | None = None,
 ) -> None:
     """Append a downstream-impact note to each anomaly's message in place.
 
-    The note quotes up to 3 downstream model names plus an overflow count
-    so the alerter payload stays readable while still hinting at scale.
-    No-op when the node has no downstream consumers — callers won't be
-    flooded with `Affects 0 downstream models` lines on leaf marts.
+    Resource types are classified for presentation only. The full transitive
+    graph is still traversed so tests and other intermediate resources cannot
+    hide an exposure farther downstream.
     """
     from scherlok.dbt import display_name as _display_name
     from scherlok.dbt import downstream_of as _downstream_of
@@ -1074,16 +1088,59 @@ def _enrich_anomalies_with_lineage(
     downstream = _downstream_of(graph, unique_id)
     if not downstream:
         return
-    names = [_display_name(uid) for uid in downstream]
-    preview = ", ".join(names[:3])
-    overflow = f" (+{len(names) - 3} more)" if len(names) > 3 else ""
-    plural = "s" if len(names) != 1 else ""
-    suffix = (
-        f" · Affects {len(names)} downstream model{plural}: {preview}{overflow}"
-    )
+
+    model_ids = [uid for uid in downstream if uid.split(".", 1)[0] == "model"]
+    exposure_ids = [uid for uid in downstream if uid.split(".", 1)[0] == "exposure"]
+    suffixes: list[str] = []
+    if model_ids:
+        model_names = [_display_name(uid) for uid in model_ids]
+        preview = ", ".join(model_names[:3])
+        overflow = f" (+{len(model_names) - 3} more)" if len(model_names) > 3 else ""
+        plural = "s" if len(model_names) != 1 else ""
+        suffixes.append(
+            f"Affects {len(model_names)} downstream model{plural}: {preview}{overflow}"
+        )
+
+    exposure_by_id = {
+        exposure.unique_id: exposure for exposure in exposures or []
+    }
+    if exposure_ids:
+        exposure_names = [
+            _format_exposure(uid, exposure_by_id.get(uid), _display_name)
+            for uid in exposure_ids
+        ]
+        preview = ", ".join(exposure_names[:3])
+        overflow = f" (+{len(exposure_names) - 3} more)" if len(exposure_names) > 3 else ""
+        plural = "s" if len(exposure_names) != 1 else ""
+        suffixes.append(
+            f"Downstream exposure{plural}: {preview}{overflow}"
+        )
+
+    if not suffixes:
+        return
+    suffix = " · " + " · ".join(suffixes)
     for a in anomalies:
         msg = a.get("message", "")
         a["message"] = f"{msg}{suffix}"
+
+
+def _format_exposure(
+    unique_id: str,
+    exposure: DbtExposure | None,
+    fallback_name: Callable[[str], str],
+) -> str:
+    """Render one exposure with its useful owner information."""
+    if exposure is None:
+        label = fallback_name(unique_id)
+        return label
+
+    label = exposure.display_name
+    label = label or fallback_name(unique_id)
+    if exposure.owner_emails:
+        return f"{label} (owner: {', '.join(exposure.owner_emails)})"
+    if exposure.owner_name:
+        return f"{label} (owner: {exposure.owner_name})"
+    return label
 
 
 def _upstream_preview(graph: dict[str, list[str]], unique_id: str) -> list[str]:
