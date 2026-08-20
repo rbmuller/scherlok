@@ -1,4 +1,4 @@
-"""Parse dbt's target/manifest.json to discover models and sources."""
+"""Parse dbt's target/manifest.json to discover models, sources, and exposures."""
 
 from __future__ import annotations
 
@@ -24,6 +24,23 @@ class DbtNode:
     identifier: str  # alias for models, identifier for sources
     relation_name: str | None  # quoted FQN as dbt produced it (may be None)
     adapter: str  # postgres / bigquery / snowflake
+
+
+@dataclass(frozen=True)
+class DbtExposure:
+    """A dbt exposure that consumes one or more project resources."""
+
+    unique_id: str
+    name: str
+    label: str | None
+    exposure_type: str
+    owner_name: str | None
+    owner_emails: tuple[str, ...]
+
+    @property
+    def display_name(self) -> str:
+        """Return the human-readable label, falling back to the manifest name."""
+        return self.label or self.name
 
 
 def load_manifest(project_dir: str | Path) -> dict:
@@ -137,6 +154,66 @@ def discover_sources(manifest: dict) -> list[DbtNode]:
         )
 
     return sources
+
+
+def discover_exposures(manifest: dict) -> list[DbtExposure]:
+    """Return exposures declared in the manifest.
+
+    dbt currently emits ``owner.email`` as a string, but accepting a list here
+    keeps schema-shape handling at the manifest boundary.
+    """
+    exposures_dict = manifest.get("exposures", {})
+    if not isinstance(exposures_dict, dict):
+        return []
+    exposures: list[DbtExposure] = []
+
+    for unique_id, raw_exposure in exposures_dict.items():
+        if not isinstance(raw_exposure, dict):
+            continue
+        owner = raw_exposure.get("owner")
+        if not isinstance(owner, dict):
+            owner = {}
+        email_value = owner.get("email")
+        if email_value is None:
+            email_value = owner.get("emails")
+
+        exposures.append(
+            DbtExposure(
+                unique_id=unique_id,
+                name=_optional_text(raw_exposure.get("name")) or "",
+                label=_optional_text(raw_exposure.get("label")),
+                exposure_type=_optional_text(raw_exposure.get("type")) or "",
+                owner_name=_optional_text(owner.get("name")),
+                owner_emails=_normalize_owner_emails(email_value),
+            )
+        )
+
+    return exposures
+
+
+def _optional_text(value: object) -> str | None:
+    """Return stripped text or None for absent/non-text manifest values."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _normalize_owner_emails(value: object) -> tuple[str, ...]:
+    """Normalize one or many owner email values into deterministic output."""
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, (list, tuple)):
+        values = value
+    else:
+        values = ()
+
+    emails = {
+        email.strip()
+        for email in values
+        if isinstance(email, str) and email.strip()
+    }
+    return tuple(sorted(emails, key=str.casefold))
 
 
 def _parse_manifest_version(manifest: dict) -> int:

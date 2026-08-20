@@ -110,9 +110,12 @@ def test_downstream_of_excludes_self_under_cycle():
 def test_downstream_of_root_walks_full_descent(graph):
     desc = downstream_of(graph, "seed.jaffle_shop.raw_customers")
     # raw_customers -> stg_customers -> {fct_orders, dim_customers_inc, test}
+    # dim_customers_inc -> revenue_dashboard exposure
     assert "model.jaffle_shop.stg_customers" in desc
     assert "model.jaffle_shop.fct_orders" in desc
     assert "model.jaffle_shop.dim_customers_inc" in desc
+    assert "test.jaffle_shop.unique_stg_customers_id.abc123" in desc
+    assert "exposure.jaffle_shop.revenue_dashboard" in desc
 
 
 def test_downstream_of_leaf_returns_empty(graph):

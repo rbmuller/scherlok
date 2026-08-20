@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from scherlok.dbt.manifest import (
+    discover_exposures,
     discover_models,
     discover_sources,
     load_manifest,
@@ -84,6 +85,80 @@ def test_discover_sources():
 def test_discover_sources_empty_when_none():
     manifest = load_manifest(SF_PROJECT)
     assert discover_sources(manifest) == []
+
+
+def test_discover_exposures_parses_label_type_and_owner_email():
+    manifest = load_manifest(PG_PROJECT)
+    exposures = discover_exposures(manifest)
+
+    assert len(exposures) == 1
+    exposure = exposures[0]
+    assert exposure.unique_id == "exposure.jaffle_shop.revenue_dashboard"
+    assert exposure.name == "revenue_dashboard"
+    assert exposure.label == "Revenue Dashboard"
+    assert exposure.display_name == "Revenue Dashboard"
+    assert exposure.exposure_type == "dashboard"
+    assert exposure.owner_name == "Analytics Team"
+    assert exposure.owner_emails == ("analytics-team@company.com",)
+
+
+def test_discover_exposures_falls_back_to_name_without_label():
+    manifest = {
+        "exposures": {
+            "exposure.demo.named_dashboard": {
+                "name": "named_dashboard",
+                "type": "dashboard",
+            }
+        }
+    }
+
+    exposure = discover_exposures(manifest)[0]
+
+    assert exposure.label is None
+    assert exposure.display_name == "named_dashboard"
+
+
+@pytest.mark.parametrize(
+    ("email", "expected"),
+    [
+        ("owner@example.com", ("owner@example.com",)),
+        (["z@example.com", "a@example.com", "z@example.com"], ("a@example.com", "z@example.com")),
+    ],
+)
+def test_discover_exposures_normalizes_single_and_list_owner_emails(email, expected):
+    manifest = {
+        "exposures": {
+            "exposure.demo.dashboard": {
+                "name": "dashboard",
+                "type": "dashboard",
+                "owner": {"email": email},
+            }
+        }
+    }
+
+    assert discover_exposures(manifest)[0].owner_emails == expected
+
+
+def test_discover_exposures_handles_missing_owner_email():
+    manifest = {
+        "exposures": {
+            "exposure.demo.dashboard": {
+                "name": "dashboard",
+                "type": "dashboard",
+                "owner": {"name": "Analytics Team"},
+            }
+        }
+    }
+
+    exposure = discover_exposures(manifest)[0]
+
+    assert exposure.owner_name == "Analytics Team"
+    assert exposure.owner_emails == ()
+
+
+def test_discover_exposures_empty_when_none():
+    manifest = load_manifest(SF_PROJECT)
+    assert discover_exposures(manifest) == []
 
 
 def test_load_manifest_unsupported_adapter(tmp_path):

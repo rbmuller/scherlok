@@ -12,14 +12,23 @@ from scherlok.dbt.lineage import (
     render_lineage_tree,
     upstream_of,
 )
-from scherlok.dbt.manifest import DbtNode, discover_models, discover_sources, load_manifest
+from scherlok.dbt.manifest import (
+    DbtExposure,
+    DbtNode,
+    discover_exposures,
+    discover_models,
+    discover_sources,
+    load_manifest,
+)
 from scherlok.dbt.profiles import ProfileResolutionError, resolve_connection_string
 from scherlok.dbt.run_results import load_run_results, successful_model_unique_ids
 
 __all__ = [
     "DbtNode",
+    "DbtExposure",
     "ProfileResolutionError",
     "build_dependency_graph",
+    "discover_exposures",
     "discover_models",
     "discover_sources",
     "display_name",

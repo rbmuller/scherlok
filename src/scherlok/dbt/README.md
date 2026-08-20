@@ -127,6 +127,14 @@ When an anomaly fires, the message is enriched with downstream impact so the ale
 ✗ stg_customers  CRITICAL: Row count dropped 60.0% (1000 → 400) · Affects 2 downstream models: fct_orders, dim_customers_inc
 ```
 
+When the manifest declares dbt exposures, exposure descendants are shown separately from models. The exposure label is preferred over its manifest name, and useful owner information is included when present:
+
+```
+✗ stg_customers  CRITICAL: Row count dropped 42% · Affects 2 downstream models: fct_orders, dim_customers_inc · Downstream exposure: Revenue Dashboard (owner: analytics-team@company.com)
+```
+
+Lineage continues to come from `parent_map`, so tests and other non-model resources may remain traversal nodes without being mislabeled as downstream models. Exposure owners are surfaced in the existing alert message only; Scherlok does not automatically notify those addresses unless the configured alert destination already reaches them. Multiple exposures use the same bounded preview convention as downstream models.
+
 Leaf marts (no descendants) get no suffix.
 
 ## What's coming next
