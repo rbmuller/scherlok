@@ -18,8 +18,8 @@ models:
 
   - name: scherlok_column_metrics
     description: >
-      Append-only log of per-column null rates for all monitored models.
-      Used by the null_anomaly test for statistical drift detection.
+      Append-only log of per-column null rates for columns with null_anomaly
+      tests. Used by the null_anomaly test for statistical drift detection.
     columns:
       - name: table_name
         description: Name of the monitored dbt model
