@@ -888,8 +888,8 @@ def dbt_run_and_watch(
 
     Pass `--build` to use `dbt build` instead. The normal `dbt run` path
     remains unchanged. For `dbt build`, successfully executed models from
-    run_results.json are profiled even when a test failure skips downstream
-    resources, and the build's exit code is preserved.
+    run_results.json are profiled when a handled build failure (exit 1) skips
+    downstream resources, and the build's exit code is preserved.
 
     Wraps the typical CI sequence (`dbt run` -> `scherlok dbt`) into one
     command. If `dbt run` fails, exits with the same code WITHOUT running
@@ -958,17 +958,17 @@ def dbt_run_and_watch(
             cmd, check=False, stdout=sys.stderr if json_mode else None
         )
         dbt_returncode = completed.returncode
-        if dbt_returncode != 0 and not build:
+        if dbt_returncode != 0 and (not build or dbt_returncode != 1):
             if json_mode:
                 payload = {
                     "project_dir": project_dir,
-                    "error": "dbt run failed",
+                    "error": f"dbt {dbt_action} failed",
                     "returncode": dbt_returncode,
                 }
                 print(json.dumps(payload))
             else:
                 out_error(
-                    f"[red]`dbt run` failed with exit code {dbt_returncode}. "
+                    f"[red]`dbt {dbt_action}` failed with exit code {dbt_returncode}. "
                     f"Skipping scherlok watch (manifest may be stale).[/red]"
                 )
             raise typer.Exit(code=dbt_returncode)
@@ -984,7 +984,7 @@ def dbt_run_and_watch(
                 run_results["results"]
             )
         except (FileNotFoundError, OSError, ValueError) as exc:
-            if dbt_returncode:
+            if dbt_returncode == 1:
                 message = (
                     f"`dbt {dbt_action}` failed with exit code {dbt_returncode}, and its "
                     f"run_results.json artifact could not be used: {exc}"
@@ -1006,7 +1006,7 @@ def dbt_run_and_watch(
                 out_error(f"[red]{message}[/red]")
             raise typer.Exit(code=error_code) from exc
 
-        if dbt_returncode:
+        if dbt_returncode == 1:
             out_error(
                 f"[red]`dbt build` failed with exit code {dbt_returncode}. "
                 "Profiling successfully built models from run_results.json; "
@@ -1034,10 +1034,10 @@ def dbt_run_and_watch(
                 executed_model_ids=executed_model_ids,
             )
         except typer.Exit:
-            if dbt_returncode:
+            if dbt_returncode == 1:
                 raise typer.Exit(code=dbt_returncode)
             raise
-        if dbt_returncode:
+        if dbt_returncode == 1:
             raise typer.Exit(code=dbt_returncode)
     finally:
         if json_mode:

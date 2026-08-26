@@ -106,7 +106,9 @@ Or collapse both steps into one with the wrapper:
 The wrapper runs `dbt run` by default and uses the successful model nodes recorded in
 `target/run_results.json`, so partial runs profile only what dbt actually built. Use
 `--build` to run `dbt build`; successful models are still profiled when a test failure
-causes downstream models to be skipped, while the wrapper preserves `dbt build`'s exit code.
+causes downstream models to be skipped on dbt's handled failure path (exit 1), while
+the wrapper preserves `dbt build`'s exit code. Unhandled failures fail fast without
+reading the artifact.
 
 Both `dbt` and `dbt-run-and-watch` accept `--output json` for CI parsers — a single JSON document on stdout, nothing else.
 

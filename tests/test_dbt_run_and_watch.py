@@ -132,7 +132,7 @@ def test_dbt_run_and_watch_passes_select_through_to_dbt():
 def test_dbt_run_and_watch_build_profiles_successful_models_and_preserves_failure(
     mock_get_connector, tmp_path, monkeypatch
 ):
-    """A failed build still profiles successful models and keeps dbt's exit code."""
+    """A handled build failure still profiles models and keeps dbt's exit code."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     project_dir = _copy_project_with_run_results(
         tmp_path,
@@ -148,7 +148,7 @@ def test_dbt_run_and_watch_build_profiles_successful_models_and_preserves_failur
     fake_conn.list_tables.return_value = ["stg_customers"]
     mock_get_connector.return_value = fake_conn
     fake_run = MagicMock()
-    fake_run.return_value.returncode = 2
+    fake_run.return_value.returncode = 1
 
     with (
         patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"),
@@ -165,7 +165,7 @@ def test_dbt_run_and_watch_build_profiles_successful_models_and_preserves_failur
             ],
         )
 
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     cmd_args = fake_run.call_args.args[0]
     assert cmd_args[1] == "build"
     assert [call.args[2] for call in mock_watch.call_args_list] == ["stg_customers"]
@@ -176,7 +176,7 @@ def test_dbt_run_and_watch_build_profiles_successful_models_and_preserves_failur
 def test_dbt_run_and_watch_build_json_profiles_before_preserving_failure(
     mock_get_connector, tmp_path, monkeypatch
 ):
-    """JSON mode emits the profiling payload even when dbt build fails."""
+    """JSON mode emits the profiling payload on a handled build failure."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     project_dir = _copy_project_with_run_results(
         tmp_path, [_successful_result("model.jaffle_shop.stg_customers")]
@@ -186,7 +186,7 @@ def test_dbt_run_and_watch_build_json_profiles_before_preserving_failure(
     fake_conn.list_tables.return_value = ["stg_customers"]
     mock_get_connector.return_value = fake_conn
     fake_run = MagicMock()
-    fake_run.return_value.returncode = 3
+    fake_run.return_value.returncode = 1
 
     with (
         patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"),
@@ -204,18 +204,18 @@ def test_dbt_run_and_watch_build_json_profiles_before_preserving_failure(
             ],
         )
 
-    assert result.exit_code == 3
+    assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload["summary"]["profiled"] == 1
     assert "dbt build failed" not in result.stdout
 
 
 def test_dbt_run_and_watch_build_artifact_failure_preserves_exit_code(tmp_path):
-    """A failed build without usable results still returns dbt's status."""
+    """A handled build failure without results still returns dbt's status."""
     project_dir = _copy_project_with_run_results(tmp_path, [])
     (project_dir / "target" / "run_results.json").unlink()
     fake_run = MagicMock()
-    fake_run.return_value.returncode = 4
+    fake_run.return_value.returncode = 1
 
     with (
         patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"),
@@ -232,9 +232,74 @@ def test_dbt_run_and_watch_build_artifact_failure_preserves_exit_code(tmp_path):
             ],
         )
 
-    assert result.exit_code == 4
+    assert result.exit_code == 1
     assert "run_results.json" in result.output
     mock_impl.assert_not_called()
+
+
+def test_dbt_run_and_watch_build_unhandled_failure_skips_artifact(tmp_path):
+    """An unhandled build failure must not trust even an existing artifact."""
+    project_dir = _copy_project_with_run_results(
+        tmp_path, [_successful_result("model.jaffle_shop.stg_customers")]
+    )
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 2
+
+    with (
+        patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"),
+        patch("scherlok.cli.subprocess.run", fake_run),
+        patch("scherlok.cli._dbt_impl") as mock_impl,
+        patch("scherlok.dbt.load_run_results") as mock_load,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--build",
+                "--output", "json",
+            ],
+        )
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "project_dir": str(project_dir),
+        "error": "dbt build failed",
+        "returncode": 2,
+    }
+    mock_load.assert_not_called()
+    mock_impl.assert_not_called()
+
+
+def test_dbt_run_and_watch_build_success_profiles_from_artifact(tmp_path):
+    """A successful build uses the same artifact-driven profiling path as run."""
+    project_dir = _copy_project_with_run_results(
+        tmp_path, [_successful_result("model.jaffle_shop.stg_customers")]
+    )
+    fake_run = MagicMock()
+    fake_run.return_value.returncode = 0
+
+    with (
+        patch("scherlok.cli.shutil.which", return_value="/usr/local/bin/dbt"),
+        patch("scherlok.cli.subprocess.run", fake_run),
+        patch("scherlok.cli._dbt_impl") as mock_impl,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "dbt-run-and-watch",
+                "--project-dir", str(project_dir),
+                "--build",
+                "--connection-string", "postgresql://u:p@h/d",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert fake_run.call_args.args[0][1] == "build"
+    assert mock_impl.call_args.kwargs["executed_model_ids"] == {
+        "model.jaffle_shop.stg_customers"
+    }
 
 
 @patch("scherlok.cli.get_connector")
