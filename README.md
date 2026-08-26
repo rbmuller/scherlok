@@ -103,7 +103,10 @@ Or collapse both steps into one with the wrapper:
 - run: scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
 ```
 
-The wrapper uses the successful model nodes recorded in `target/run_results.json` after `dbt run`, so partial runs profile only what dbt actually built.
+The wrapper runs `dbt run` by default and uses the successful model nodes recorded in
+`target/run_results.json`, so partial runs profile only what dbt actually built. Use
+`--build` to run `dbt build`; successful models are still profiled when a test failure
+causes downstream models to be skipped, while the wrapper preserves `dbt build`'s exit code.
 
 Both `dbt` and `dbt-run-and-watch` accept `--output json` for CI parsers — a single JSON document on stdout, nothing else.
 

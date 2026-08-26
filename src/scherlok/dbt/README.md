@@ -78,7 +78,8 @@ For CI parsers, pass `--output json` to emit a single JSON document on stdout (s
 
 ### One-shot wrapper: `scherlok dbt-run-and-watch`
 
-If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one invocation:
+If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one invocation.
+The wrapper uses `dbt run` by default:
 
 ```yaml
 - run: |
@@ -87,6 +88,19 @@ If your CI step is just `dbt run` then `scherlok dbt`, collapse them into one in
 ```
 
 The wrapper streams `dbt run` output live. If `dbt run` exits non-zero, the wrapper propagates the exit code and skips the watch (a stale or partial manifest would surface noise, not signal). After a successful run, it reads that invocation's `target/run_results.json` and profiles only successfully built model nodes. `--project-dir`, `--target`, `--profiles-dir`, and `--select` are forwarded to `dbt run`; everything else stays scherlok-only.
+
+Pass `--build` to run `dbt build` instead:
+
+```yaml
+- run: scherlok dbt-run-and-watch --project-dir . --target prod --build --fail-on critical
+```
+
+`dbt build` runs tests between resources, so a failed test can leave successful upstream
+models profilable while downstream models are skipped. The wrapper uses the same
+`run_results.json` filtering and profiles only successful `model.*` nodes; it does not
+reimplement dbt selectors or DAG semantics. If the build exits non-zero, the wrapper
+still returns that exact dbt exit code after profiling. If its artifact is unavailable,
+profiling is skipped and the failure is reported with the dbt exit code.
 
 If `run_results.json` is missing or malformed after a successful `dbt run`, the wrapper fails clearly instead of falling back to every model in the manifest. `--include-sources` and `--include-snapshots` remain explicit opt-ins and are not inferred from model execution results.
 
@@ -98,7 +112,7 @@ The wrapper also accepts `--output json`, matching `scherlok dbt --output json`:
     scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical --output json
 ```
 
-Under `--output json`, `dbt run`'s own stdout is rerouted to stderr so it never mixes with the JSON payload. If `dbt run` fails, stdout gets a small JSON error document (`{"project_dir", "error", "returncode"}`) instead of plain text, so a CI parser only ever has to handle one format on stdout.
+Under `--output json`, the dbt command's own stdout is rerouted to stderr so it never mixes with the JSON payload. If `dbt run` fails, stdout gets a small JSON error document (`{"project_dir", "error", "returncode"}`) instead of plain text. If `dbt build` fails but produces usable results, stdout contains the profiling JSON and the process still exits with dbt's failure code.
 
 ## Lineage and downstream impact
 

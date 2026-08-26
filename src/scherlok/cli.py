@@ -847,9 +847,12 @@ def dbt_run_and_watch(
     select: list[str] = typer.Option(
         None, "--select", "-s",
         help=(
-            "Only profile these models. Also passed to `dbt run` as --select. "
+            "Only profile these models. Also passed to the dbt command as --select. "
             "Repeat to select multiple."
         ),
+    ),
+    build: bool = typer.Option(
+        False, "--build", help="Run `dbt build` instead of `dbt run`."
     ),
     include_sources: bool = typer.Option(
         False, "--include-sources", help="Also profile dbt sources, not only models"
@@ -883,6 +886,11 @@ def dbt_run_and_watch(
 ) -> None:
     """Run `dbt run` then immediately profile the freshly built models.
 
+    Pass `--build` to use `dbt build` instead. The normal `dbt run` path
+    remains unchanged. For `dbt build`, successfully executed models from
+    run_results.json are profiled even when a test failure skips downstream
+    resources, and the build's exit code is preserved.
+
     Wraps the typical CI sequence (`dbt run` -> `scherlok dbt`) into one
     command. If `dbt run` fails, exits with the same code WITHOUT running
     scherlok -- the manifest is stale or partial and watching it would
@@ -893,6 +901,7 @@ def dbt_run_and_watch(
 
     Example:
         scherlok dbt-run-and-watch --project-dir . --target prod --fail-on critical
+        scherlok dbt-run-and-watch --project-dir . --build --fail-on critical
         scherlok dbt-run-and-watch --project-dir . --output json  # CI-parseable stdout
     """
     output_lower = output.lower()
@@ -930,7 +939,8 @@ def dbt_run_and_watch(
                 out_error(f"[red]{message}[/red]")
             raise typer.Exit(code=1)
 
-        cmd: list[str] = [dbt_bin, "run", "--project-dir", project_dir]
+        dbt_action = "build" if build else "run"
+        cmd: list[str] = [dbt_bin, dbt_action, "--project-dir", project_dir]
         if profiles_dir:
             cmd.extend(["--profiles-dir", profiles_dir])
         if target:
@@ -947,22 +957,24 @@ def dbt_run_and_watch(
         completed = subprocess.run(
             cmd, check=False, stdout=sys.stderr if json_mode else None
         )
-        if completed.returncode != 0:
+        dbt_returncode = completed.returncode
+        if dbt_returncode != 0 and not build:
             if json_mode:
                 payload = {
                     "project_dir": project_dir,
                     "error": "dbt run failed",
-                    "returncode": completed.returncode,
+                    "returncode": dbt_returncode,
                 }
                 print(json.dumps(payload))
             else:
                 out_error(
-                    f"[red]`dbt run` failed with exit code {completed.returncode}. "
+                    f"[red]`dbt run` failed with exit code {dbt_returncode}. "
                     f"Skipping scherlok watch (manifest may be stale).[/red]"
                 )
-            raise typer.Exit(code=completed.returncode)
+            raise typer.Exit(code=dbt_returncode)
 
-        out_info("[green]dbt run succeeded.[/green] Reading execution results...")
+        if dbt_returncode == 0:
+            out_info(f"[green]dbt {dbt_action} succeeded.[/green] Reading execution results...")
         from scherlok.dbt import load_run_results
         from scherlok.dbt.run_results import _successful_model_unique_ids_from_validated
 
@@ -972,39 +984,61 @@ def dbt_run_and_watch(
                 run_results["results"]
             )
         except (FileNotFoundError, OSError, ValueError) as exc:
-            message = (
-                "`dbt run` succeeded, but its run_results.json artifact could not be "
-                f"used: {exc}"
-            )
+            if dbt_returncode:
+                message = (
+                    f"`dbt {dbt_action}` failed with exit code {dbt_returncode}, and its "
+                    f"run_results.json artifact could not be used: {exc}"
+                )
+                error_code = dbt_returncode
+            else:
+                message = (
+                    f"`dbt {dbt_action}` succeeded, but its run_results.json artifact "
+                    f"could not be used: {exc}"
+                )
+                error_code = 1
             if json_mode:
                 print(
                     json.dumps(
-                        {"project_dir": project_dir, "error": message, "returncode": 1}
+                        {"project_dir": project_dir, "error": message, "returncode": error_code}
                     )
                 )
             else:
                 out_error(f"[red]{message}[/red]")
-            raise typer.Exit(code=1) from exc
+            raise typer.Exit(code=error_code) from exc
+
+        if dbt_returncode:
+            out_error(
+                f"[red]`dbt build` failed with exit code {dbt_returncode}. "
+                "Profiling successfully built models from run_results.json; "
+                "preserving the dbt exit code.[/red]"
+            )
 
         # Call the implementation function (not the Typer-decorated `dbt`) so the
         # parameter defaults resolve to actual values instead of `OptionInfo`
         # sentinels. Pass every kwarg explicitly; `_dbt_impl` is keyword-only.
-        _dbt_impl(
-            project_dir=project_dir,
-            profiles_dir=profiles_dir,
-            target=target,
-            connection_string=connection_string,
-            select=select,
-            include_sources=include_sources,
-            include_snapshots=include_snapshots,
-            webhook=webhook,
-            email=email or None,
-            fail_on=fail_on,
-            json_mode=json_mode,
-            show_lineage=show_lineage,
-            explain=explain,
-            executed_model_ids=executed_model_ids,
-        )
+        try:
+            _dbt_impl(
+                project_dir=project_dir,
+                profiles_dir=profiles_dir,
+                target=target,
+                connection_string=connection_string,
+                select=select,
+                include_sources=include_sources,
+                include_snapshots=include_snapshots,
+                webhook=webhook,
+                email=email or None,
+                fail_on=fail_on,
+                json_mode=json_mode,
+                show_lineage=show_lineage,
+                explain=explain,
+                executed_model_ids=executed_model_ids,
+            )
+        except typer.Exit:
+            if dbt_returncode:
+                raise typer.Exit(code=dbt_returncode)
+            raise
+        if dbt_returncode:
+            raise typer.Exit(code=dbt_returncode)
     finally:
         if json_mode:
             set_stderr(False)
