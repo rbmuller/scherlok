@@ -21,7 +21,11 @@ from scherlok.dbt.manifest import (
     load_manifest,
 )
 from scherlok.dbt.profiles import ProfileResolutionError, resolve_connection_string
-from scherlok.dbt.run_results import load_run_results, successful_model_unique_ids
+from scherlok.dbt.run_results import (
+    load_run_results,
+    successful_model_unique_ids,
+    successful_model_unique_ids_from_results,
+)
 
 __all__ = [
     "DbtNode",
@@ -39,5 +43,6 @@ __all__ = [
     "render_lineage_tree",
     "resolve_connection_string",
     "successful_model_unique_ids",
+    "successful_model_unique_ids_from_results",
     "upstream_of",
 ]

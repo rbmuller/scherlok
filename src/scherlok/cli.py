@@ -975,12 +975,11 @@ def dbt_run_and_watch(
 
         if dbt_returncode == 0:
             out_info(f"[green]dbt {dbt_action} succeeded.[/green] Reading execution results...")
-        from scherlok.dbt import load_run_results
-        from scherlok.dbt.run_results import _successful_model_unique_ids_from_validated
+        from scherlok.dbt import load_run_results, successful_model_unique_ids_from_results
 
         try:
             run_results = load_run_results(project_dir)
-            executed_model_ids = _successful_model_unique_ids_from_validated(
+            executed_model_ids = successful_model_unique_ids_from_results(
                 run_results["results"]
             )
         except (FileNotFoundError, OSError, ValueError) as exc:

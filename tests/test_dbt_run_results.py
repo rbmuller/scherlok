@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scherlok.dbt import successful_model_unique_ids_from_results
 from scherlok.dbt.run_results import load_run_results, successful_model_unique_ids
 
 
@@ -52,6 +53,19 @@ def test_successful_model_unique_ids_extracts_only_successful_models():
     }
 
     assert successful_model_unique_ids(run_results) == {"model.demo.orders"}
+
+
+def test_successful_model_unique_ids_from_results_filters_validated_rows():
+    results = [
+        {"unique_id": "model.demo.orders", "status": "success"},
+        {"unique_id": "model.demo.customers", "status": "error"},
+        {"unique_id": "model.demo.payments", "status": "skipped"},
+        {"unique_id": "seed.demo.raw_orders", "status": "success"},
+        {"unique_id": "test.demo.orders", "status": "success"},
+        {"unique_id": "snapshot.demo.orders", "status": "success"},
+    ]
+
+    assert successful_model_unique_ids_from_results(results) == {"model.demo.orders"}
 
 
 @pytest.mark.parametrize(

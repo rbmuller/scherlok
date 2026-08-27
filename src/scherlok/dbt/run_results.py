@@ -30,13 +30,13 @@ def load_run_results(project_dir: str | Path) -> dict[str, Any]:
 
 def successful_model_unique_ids(run_results: object) -> set[str]:
     """Return unique IDs for successfully executed dbt model nodes."""
-    return _successful_model_unique_ids_from_validated(_validated_results(run_results))
+    return successful_model_unique_ids_from_results(_validated_results(run_results))
 
 
-def _successful_model_unique_ids_from_validated(
+def successful_model_unique_ids_from_results(
     results: list[dict[str, Any]],
 ) -> set[str]:
-    """Return successful model IDs from rows already validated by the loader."""
+    """Return successful model IDs from an already-validated results list."""
     return {
         result["unique_id"]
         for result in results
