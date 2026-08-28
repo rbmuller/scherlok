@@ -53,6 +53,11 @@ scherlok watch                                    # detect anomalies
 
 Three commands. Five minutes. Done.
 
+After five valid profiles, Scherlok learns per-metric variability from the
+latest 30 profiles using robust historical baselines for volume, numeric mean
+shifts, NULL rates, and distinct counts. During cold start or when history is
+not usable, it keeps the conservative fixed defaults.
+
 ## What It Catches
 
 | Anomaly | What Happened | Severity |

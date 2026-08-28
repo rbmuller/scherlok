@@ -41,9 +41,12 @@ def profile_and_detect(
     anomalies: list[dict] = []
 
     current_vol = profile_volume(connector, table)
+    volume_history = store.get_profile_history(table, "volume", days=None, limit=30)
     stored_vol = store.get_latest_profile(table, "volume")
     if stored_vol:
-        anomalies.extend(detect_volume_anomalies(table, current_vol, stored_vol))
+        anomalies.extend(
+            detect_volume_anomalies(table, current_vol, stored_vol, history=volume_history)
+        )
 
     current_sch = profile_schema(connector, table)
     stored_sch = store.get_latest_profile(table, "schema")
@@ -58,16 +61,25 @@ def profile_and_detect(
     for col in (current_sch or {}).get("columns", []):
         col_name = col["name"]
         current_dist = profile_distribution(connector, table, col_name)
+        distribution_history = store.get_profile_history(
+            table, f"distribution:{col_name}", days=None, limit=30
+        )
         stored_dist = store.get_latest_profile(table, f"distribution:{col_name}")
         if stored_dist:
             anomalies.extend(
-                detect_nullability_anomalies(table, col_name, current_dist, stored_dist)
+                detect_nullability_anomalies(
+                    table, col_name, current_dist, stored_dist, history=distribution_history
+                )
             )
             anomalies.extend(
-                detect_distribution_shift(table, col_name, current_dist, stored_dist)
+                detect_distribution_shift(
+                    table, col_name, current_dist, stored_dist, history=distribution_history
+                )
             )
             anomalies.extend(
-                detect_cardinality_anomalies(table, col_name, current_dist, stored_dist)
+                detect_cardinality_anomalies(
+                    table, col_name, current_dist, stored_dist, history=distribution_history
+                )
             )
         store.save_profile(table, f"distribution:{col_name}", current_dist)
 

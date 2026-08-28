@@ -62,6 +62,16 @@ class TestProfileStore:
         assert history[0]["row_count"] == 300  # most recent first
         store.close()
 
+    def test_profile_history_can_limit_latest_profiles_without_date_filter(self):
+        store = _temp_store()
+        for count in (100, 200, 300):
+            store.save_profile("users", "volume", {"row_count": count})
+
+        history = store.get_profile_history("users", "volume", days=None, limit=2)
+
+        assert [profile["row_count"] for profile in history] == [300, 200]
+        store.close()
+
     def test_save_and_get_anomalies(self):
         store = _temp_store()
         anomalies = [
