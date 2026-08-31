@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from scherlok.connectors.base import BaseConnector
+from scherlok.detector.adaptive import ADAPTIVE_HISTORY_LIMIT
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.cardinality import detect_cardinality_anomalies
 from scherlok.detector.distribution_shift import detect_distribution_shift
@@ -41,7 +42,9 @@ def profile_and_detect(
     anomalies: list[dict] = []
 
     current_vol = profile_volume(connector, table)
-    volume_history = store.get_profile_history(table, "volume", days=None, limit=30)
+    volume_history = store.get_profile_history(
+        table, "volume", days=None, limit=ADAPTIVE_HISTORY_LIMIT
+    )
     stored_vol = store.get_latest_profile(table, "volume")
     if stored_vol:
         anomalies.extend(
@@ -62,7 +65,10 @@ def profile_and_detect(
         col_name = col["name"]
         current_dist = profile_distribution(connector, table, col_name)
         distribution_history = store.get_profile_history(
-            table, f"distribution:{col_name}", days=None, limit=30
+            table,
+            f"distribution:{col_name}",
+            days=None,
+            limit=ADAPTIVE_HISTORY_LIMIT,
         )
         stored_dist = store.get_latest_profile(table, f"distribution:{col_name}")
         if stored_dist:
