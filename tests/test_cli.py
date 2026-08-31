@@ -1,6 +1,8 @@
 """Tests for the Scherlok CLI."""
 
+import json
 import re
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -136,3 +138,190 @@ def test_status_help():
     """Test that status command has help text."""
     result = runner.invoke(app, ["status", "--help"])
     assert result.exit_code == 0
+    assert "--output" in result.output
+
+
+def test_history_help_shows_output_flag():
+    result = runner.invoke(app, ["history", "--help"])
+    assert result.exit_code == 0
+    assert "--output" in result.output
+
+
+def _mock_connector(tables=None, row_count=100, columns=None):
+    c = MagicMock()
+    c.list_tables.return_value = tables or ["users"]
+    c.get_row_count.return_value = row_count
+    c.get_columns.return_value = columns or [
+        {"name": "id", "type": "integer", "nullable": False},
+    ]
+    c.get_last_modified.return_value = None
+    return c
+
+
+class TestStatusJson:
+    def test_produces_valid_json_array(self):
+        connector = _mock_connector()
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", return_value="healthy"),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.side_effect = lambda _t, pt: {
+                "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
+                "schema": {"columns": [{"name": "id"}]},
+            }.get(pt)
+
+            result = runner.invoke(app, ["status", "--output", "json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0] == {
+            "table": "users",
+            "rows": 100,
+            "columns": 1,
+            "status": "healthy",
+            "last_profiled": "2026-08-31T12:00:00+00:00",
+        }
+
+    def test_unprofiled_table_has_null_fields(self):
+        connector = _mock_connector()
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", return_value="unknown"),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.return_value = None
+
+            result = runner.invoke(app, ["status", "--output", "json"])
+
+        data = json.loads(result.output)
+        assert data[0]["rows"] is None
+        assert data[0]["columns"] is None
+        assert data[0]["last_profiled"] is None
+        assert data[0]["status"] == "unknown"
+
+    def test_multiple_tables(self):
+        connector = _mock_connector(tables=["orders", "users"])
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", side_effect=["critical", "healthy"]),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.side_effect = lambda _t, pt: {
+                "volume": {"row_count": 50, "timestamp": "2026-08-30T00:00:00+00:00"},
+                "schema": {"columns": [{"name": "id"}, {"name": "name"}]},
+            }.get(pt)
+
+            result = runner.invoke(app, ["status", "--output", "json"])
+
+        data = json.loads(result.output)
+        assert len(data) == 2
+        assert data[0]["table"] == "orders"
+        assert data[0]["status"] == "critical"
+        assert data[1]["table"] == "users"
+        assert data[1]["status"] == "healthy"
+
+    def test_text_mode_still_works(self):
+        connector = _mock_connector()
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", return_value="healthy"),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.side_effect = lambda _t, pt: {
+                "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
+                "schema": {"columns": [{"name": "id"}]},
+            }.get(pt)
+
+            result = runner.invoke(app, ["status"])
+
+        assert result.exit_code == 0
+        output = ANSI_RE.sub("", result.output)
+        assert "Table Health" in output
+        assert "users" in output
+
+    def test_invalid_output_value_exits_1(self):
+        result = runner.invoke(app, ["status", "--output", "xml"])
+        assert result.exit_code == 1
+
+
+class TestHistoryJson:
+    def test_produces_valid_json_array(self):
+        with patch("scherlok.cli.ProfileStore") as mock_store_cls:
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_anomaly_history.return_value = [
+                {
+                    "table": "users",
+                    "type": "volume_drop",
+                    "severity": "CRITICAL",
+                    "message": "Row count dropped 50%",
+                    "detected_at": "2026-08-31T00:00:00+00:00",
+                },
+            ]
+
+            result = runner.invoke(app, ["history", "--output", "json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["severity"] == "CRITICAL"
+        assert data[0]["table"] == "users"
+        assert data[0]["type"] == "volume_drop"
+        assert data[0]["detected_at"] == "2026-08-31T00:00:00+00:00"
+
+    def test_empty_history_returns_empty_array(self):
+        with patch("scherlok.cli.ProfileStore") as mock_store_cls:
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_anomaly_history.return_value = []
+
+            result = runner.invoke(app, ["history", "--output", "json"])
+
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+    def test_respects_days_flag(self):
+        with patch("scherlok.cli.ProfileStore") as mock_store_cls:
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_anomaly_history.return_value = []
+
+            runner.invoke(app, ["history", "--days", "7", "--output", "json"])
+
+        store.get_anomaly_history.assert_called_once_with(days=7)
+
+    def test_text_mode_still_works(self):
+        with patch("scherlok.cli.ProfileStore") as mock_store_cls:
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_anomaly_history.return_value = [
+                {
+                    "table": "users",
+                    "type": "volume_drop",
+                    "severity": "CRITICAL",
+                    "message": "Row count dropped",
+                    "detected_at": "2026-08-31T12:00:00+00:00",
+                },
+            ]
+
+            result = runner.invoke(app, ["history"])
+
+        assert result.exit_code == 0
+        output = ANSI_RE.sub("", result.output)
+        assert "Anomaly History" in output
+        assert "users" in output
+
+    def test_invalid_output_value_exits_1(self):
+        result = runner.invoke(app, ["history", "--output", "xml"])
+        assert result.exit_code == 1
