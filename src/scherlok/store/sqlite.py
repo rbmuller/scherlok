@@ -90,17 +90,26 @@ class ProfileStore:
         self,
         table_name: str,
         profile_type: str,
-        days: int = 30,
+        days: int | None = 30,
+        *,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Get historical profiles for the last N days."""
-        cutoff = datetime.now(timezone.utc).isoformat()
-        rows = self._conn.execute(
+        """Get historical profiles, optionally bounded to the latest rows."""
+        query = (
             "SELECT data, created_at FROM profiles "
-            "WHERE table_name = ? AND profile_type = ? "
-            "AND created_at >= datetime(?, '-' || ? || ' days') "
-            "ORDER BY created_at DESC",
-            (table_name, profile_type, cutoff, days),
-        ).fetchall()
+            "WHERE table_name = ? AND profile_type = ?"
+        )
+        params: list[Any] = [table_name, profile_type]
+        if days is not None:
+            cutoff = datetime.now(timezone.utc).isoformat()
+            query += " AND created_at >= datetime(?, '-' || ? || ' days')"
+            params.extend([cutoff, days])
+        query += " ORDER BY created_at DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        rows = self._conn.execute(query, params).fetchall()
         return [
             {**json.loads(row["data"]), "_created_at": row["created_at"]}
             for row in rows
