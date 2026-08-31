@@ -138,13 +138,13 @@ def test_status_help():
     """Test that status command has help text."""
     result = runner.invoke(app, ["status", "--help"])
     assert result.exit_code == 0
-    assert "--output" in result.output
+    assert "--output" in ANSI_RE.sub("", result.output)
 
 
 def test_history_help_shows_output_flag():
     result = runner.invoke(app, ["history", "--help"])
     assert result.exit_code == 0
-    assert "--output" in result.output
+    assert "--output" in ANSI_RE.sub("", result.output)
 
 
 def _mock_connector(tables=None, row_count=100, columns=None):
