@@ -1356,40 +1356,51 @@ def status(
         raise typer.Exit(code=1)
     json_mode = output_lower == "json"
 
-    store = ProfileStore()
-    connector = _get_connector_or_exit()
-    tables = connector.list_tables()
-
-    records: list[dict] = []
-    for table in tables:
-        vol = store.get_latest_profile(table, "volume")
-        sch = store.get_latest_profile(table, "schema")
-        records.append({
-            "table": table,
-            "rows": vol["row_count"] if vol else None,
-            "columns": len(sch["columns"]) if sch else None,
-            "status": _table_health(connector, store, table, vol, sch),
-            "last_profiled": vol.get("timestamp") if vol else None,
-        })
-
+    from scherlok.output import set_stderr, set_verbosity
+    prev_quiet = is_quiet()
     if json_mode:
-        print(json.dumps(records))
-    else:
-        tbl = Table(title="Table Health")
-        tbl.add_column("Table", style="cyan")
-        tbl.add_column("Rows", justify="right")
-        tbl.add_column("Columns", justify="right")
-        tbl.add_column("Last Profiled")
-        tbl.add_column("Status")
-        for r in records:
-            tbl.add_row(
-                r["table"],
-                str(r["rows"]) if r["rows"] is not None else "—",
-                str(r["columns"]) if r["columns"] is not None else "—",
-                r["last_profiled"] or "—",
-                _STATUS_RICH[r["status"]],
-            )
-        console.print(tbl)
+        set_stderr(True)
+        set_verbosity(quiet=True)
+
+    try:
+        store = ProfileStore()
+        connector = _get_connector_or_exit()
+        tables = connector.list_tables()
+
+        records: list[dict] = []
+        for table in tables:
+            vol = store.get_latest_profile(table, "volume")
+            sch = store.get_latest_profile(table, "schema")
+            records.append({
+                "table": table,
+                "rows": vol["row_count"] if vol else None,
+                "columns": len(sch["columns"]) if sch else None,
+                "status": _table_health(connector, store, table, vol, sch),
+                "last_profiled": vol.get("timestamp") if vol else None,
+            })
+
+        if json_mode:
+            print(json.dumps(records))
+        else:
+            tbl = Table(title="Table Health")
+            tbl.add_column("Table", style="cyan")
+            tbl.add_column("Rows", justify="right")
+            tbl.add_column("Columns", justify="right")
+            tbl.add_column("Last Profiled")
+            tbl.add_column("Status")
+            for r in records:
+                tbl.add_row(
+                    r["table"],
+                    str(r["rows"]) if r["rows"] is not None else "—",
+                    str(r["columns"]) if r["columns"] is not None else "—",
+                    r["last_profiled"] or "—",
+                    _STATUS_RICH[r["status"]],
+                )
+            console.print(tbl)
+    finally:
+        if json_mode:
+            set_stderr(False)
+            set_verbosity(quiet=prev_quiet)
 
 
 @app.command()
