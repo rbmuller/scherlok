@@ -1297,70 +1297,141 @@ def report() -> None:
         print_profile_summary(table, vol, sch, fresh, anomaly_count=table_anomaly_count)
 
 
+def _table_health(
+    connector: object,
+    store: ProfileStore,
+    table: str,
+    vol: dict | None,
+    sch: dict | None,
+) -> str:
+    """Determine health status for one table via live anomaly check.
+
+    Returns 'healthy', 'warning', 'critical', or 'unknown' (not profiled).
+    """
+    if not vol:
+        return "unknown"
+    current_vol = profile_volume(connector, table)
+    current_sch = profile_schema(connector, table)
+    current_fresh = profile_freshness(connector, table)
+    stored_fresh = store.get_latest_profile(table, "freshness")
+    anomalies = detect_volume_anomalies(table, current_vol, vol)
+    anomalies.extend(detect_schema_drift(table, current_sch, sch))
+    if stored_fresh:
+        anomalies.extend(
+            detect_freshness_anomalies(table, current_fresh, stored_fresh)
+        )
+    if any(a["severity"].value == "CRITICAL" for a in anomalies):
+        return "critical"
+    if any(a["severity"].value == "WARNING" for a in anomalies):
+        return "warning"
+    return "healthy"
+
+
+_STATUS_RICH = {
+    "healthy": "[green]OK[/green]",
+    "warning": "[yellow]WARNING[/yellow]",
+    "critical": "[red]CRITICAL[/red]",
+    "unknown": "[yellow]Not profiled[/yellow]",
+}
+
+
 @app.command()
-def status() -> None:
+def status(
+    output: str = typer.Option(
+        "text", "--output",
+        help="Output format: 'text' (default) or 'json' for CI parsers",
+    ),
+) -> None:
     """Show health of monitored tables.
 
     Example:
         scherlok status
+        scherlok status --output json
     """
-    store = ProfileStore()
-    connector = _get_connector_or_exit()
-    tables = connector.list_tables()
+    output_lower = output.lower()
+    if output_lower not in ("text", "json"):
+        console.print(
+            f"[red]Invalid --output value '{output}'. Use 'text' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=1)
+    json_mode = output_lower == "json"
 
-    tbl = Table(title="Table Health")
-    tbl.add_column("Table", style="cyan")
-    tbl.add_column("Rows", justify="right")
-    tbl.add_column("Columns", justify="right")
-    tbl.add_column("Last Profiled")
-    tbl.add_column("Status")
+    from scherlok.output import set_stderr, set_verbosity
+    prev_quiet = is_quiet()
+    if json_mode:
+        set_stderr(True)
+        set_verbosity(quiet=True)
 
-    for table in tables:
-        vol = store.get_latest_profile(table, "volume")
-        sch = store.get_latest_profile(table, "schema")
+    try:
+        store = ProfileStore()
+        connector = _get_connector_or_exit()
+        tables = connector.list_tables()
 
-        row_count = str(vol["row_count"]) if vol else "—"
-        col_count = str(len(sch["columns"])) if sch else "—"
-        last_profiled = vol.get("timestamp", "—") if vol else "—"
+        records: list[dict] = []
+        for table in tables:
+            vol = store.get_latest_profile(table, "volume")
+            sch = store.get_latest_profile(table, "schema")
+            records.append({
+                "table": table,
+                "rows": vol["row_count"] if vol else None,
+                "columns": len(sch["columns"]) if sch else None,
+                "status": _table_health(connector, store, table, vol, sch),
+                "last_profiled": vol.get("timestamp") if vol else None,
+            })
 
-        if not vol:
-            health = "[yellow]Not profiled[/yellow]"
+        if json_mode:
+            print(json.dumps(records))
         else:
-            # Run quick anomaly check against current state
-            current_vol = profile_volume(connector, table)
-            current_sch = profile_schema(connector, table)
-            current_fresh = profile_freshness(connector, table)
-            stored_fresh = store.get_latest_profile(table, "freshness")
-            table_anomalies = detect_volume_anomalies(table, current_vol, vol)
-            table_anomalies.extend(detect_schema_drift(table, current_sch, sch))
-            if stored_fresh:
-                table_anomalies.extend(
-                    detect_freshness_anomalies(table, current_fresh, stored_fresh)
+            tbl = Table(title="Table Health")
+            tbl.add_column("Table", style="cyan")
+            tbl.add_column("Rows", justify="right")
+            tbl.add_column("Columns", justify="right")
+            tbl.add_column("Last Profiled")
+            tbl.add_column("Status")
+            for r in records:
+                tbl.add_row(
+                    r["table"],
+                    str(r["rows"]) if r["rows"] is not None else "—",
+                    str(r["columns"]) if r["columns"] is not None else "—",
+                    r["last_profiled"] or "—",
+                    _STATUS_RICH[r["status"]],
                 )
-            if any(a["severity"].value == "CRITICAL" for a in table_anomalies):
-                health = "[red]CRITICAL[/red]"
-            elif any(a["severity"].value == "WARNING" for a in table_anomalies):
-                health = "[yellow]WARNING[/yellow]"
-            else:
-                health = "[green]OK[/green]"
-
-        tbl.add_row(table, row_count, col_count, str(last_profiled), health)
-
-    console.print(tbl)
+            console.print(tbl)
+    finally:
+        if json_mode:
+            set_stderr(False)
+            set_verbosity(quiet=prev_quiet)
 
 
 @app.command()
 def history(
     days: int = typer.Option(30, "--days", "-d", help="Number of days to look back"),
+    output: str = typer.Option(
+        "text", "--output",
+        help="Output format: 'text' (default) or 'json' for CI parsers",
+    ),
 ) -> None:
     """Show timeline of detected anomalies.
 
     Example:
         scherlok history
         scherlok history --days 7
+        scherlok history --output json
     """
+    output_lower = output.lower()
+    if output_lower not in ("text", "json"):
+        console.print(
+            f"[red]Invalid --output value '{output}'. Use 'text' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=1)
+    json_mode = output_lower == "json"
+
     store = ProfileStore()
     records = store.get_anomaly_history(days=days)
+
+    if json_mode:
+        print(json.dumps(records))
+        return
 
     if not records:
         console.print(f"[green]No anomalies in the last {days} days.[/green]")
