@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-03
+
 ### Added
 - **Adaptive historical baselines** — after enough valid history, volume and column metric detectors learn per-metric variability with robust median/MAD bands; cold-start and unusable histories retain the existing fixed behavior. ([#62](https://github.com/rbmuller/scherlok/issues/62))
+- **`scherlok status --output json`** — emits a JSON array of table health objects (`table`, `rows`, `columns`, `status`, `last_profiled`) for CI parsers. Rich output is routed to stderr in JSON mode so stdout stays machine-readable. ([#14](https://github.com/rbmuller/scherlok/issues/14))
+- **`scherlok history --output json`** — emits a JSON array of anomaly records (`detected_at`, `severity`, `table`, `type`, `message`). Empty history returns `[]` instead of a text message. ([#15](https://github.com/rbmuller/scherlok/issues/15))
 - **`scherlok dbt-run-and-watch --output json`** — the wrapper now accepts the same `--output json` flag as `scherlok dbt`, so CI users get the wrapper's convenience and a machine-readable stdout payload in one step. `dbt run`'s own stdout is rerouted to stderr in JSON mode so it never mixes with the payload; if `dbt run` fails, stdout gets a small JSON error document (`project_dir`, `error`, `returncode`) instead of plain text. ([#47](https://github.com/rbmuller/scherlok/issues/47))
 - **Targeted `dbt-run-and-watch` profiling** — after a successful `dbt run`, the wrapper reads `target/run_results.json` and profiles only successful model nodes from that invocation. Missing or malformed artifacts fail clearly rather than falling back to the full manifest. ([#69](https://github.com/rbmuller/scherlok/issues/69))
 - **`dbt build` support in `dbt-run-and-watch`** — pass `--build` to run `dbt build`; on dbt's handled failure path (exit 1), successful model nodes from `run_results.json` are profiled even when tests fail and downstream models are skipped, while unhandled failures fail fast and preserve dbt's exit code. ([#76](https://github.com/rbmuller/scherlok/issues/76))
 - **Exposure-aware dbt lineage in anomaly alerts** — downstream models remain identified separately from dbt exposures, whose labels and owner information are surfaced in the existing alert message without changing notification routing. ([#70](https://github.com/rbmuller/scherlok/issues/70))
+- **Selective column profiling in dbt package** — the `scherlok_column_metrics` model now scans `graph.nodes` for `null_anomaly` test nodes and profiles only the columns that have tests attached, reducing warehouse queries on wide tables. ([#71](https://github.com/rbmuller/scherlok/issues/71))
+
+### Fixed
+- **Clean JSON stdout on dbt early exits** — `console.print` calls that leaked Rich markup to stdout on connection failures and missing manifests now use `out_error` so they route to stderr in `--output json` mode. ([#67](https://github.com/rbmuller/scherlok/issues/67))
 
 ## [0.9.0] — 2026-08-10
 
