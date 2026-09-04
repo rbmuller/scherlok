@@ -129,7 +129,7 @@ Prefer staying inside dbt? Install Scherlok as a dbt package for native data qua
 # packages.yml
 packages:
   - package: rbmuller/scherlok
-    version: [">=0.1.0", "<1.0.0"]
+    version: [">=1.0.0", "<2.0.0"]
 ```
 
 ```yaml
@@ -364,9 +364,12 @@ scherlok connect <url>          Connect to a database
 scherlok investigate            Profile all tables (learn patterns)
 scherlok watch [-w <url>] [-e <email>]  Detect anomalies and alert
 scherlok ci <url> [opts]        All-in-one CI/CD command (connect + watch + exit code)
-scherlok status                 Quick health dashboard
+scherlok dbt [--project-dir .] [--output json]  Profile dbt models from manifest
+scherlok dbt-run-and-watch [--build] [--output json]  Run dbt + profile in one step
+scherlok status [--output json] Quick health dashboard
+scherlok history [--days N] [--output json]  Timeline of past anomalies
 scherlok report                 Detailed profile summary
-scherlok history [--days N]     Timeline of past anomalies
+scherlok dashboard [--out .html] Generate self-contained HTML report
 scherlok config --store <url>   Set remote storage
 scherlok version                Show version
 ```
@@ -406,7 +409,7 @@ The image is built from `python:3.12-slim` and runs unprivileged (`USER scherlok
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 We're especially looking for:
-- New database connectors (Snowflake, MySQL, DuckDB)
+- New database connectors (e.g. Databricks — see [#37](https://github.com/rbmuller/scherlok/issues/37))
 - Anomaly detection improvements
 - Documentation and examples
 
