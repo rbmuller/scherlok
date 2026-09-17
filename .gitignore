@@ -43,3 +43,6 @@ target/
 dbt_packages/
 logs/
 .user.yml
+
+# MkDocs build output
+site/

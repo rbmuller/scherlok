@@ -1,0 +1,64 @@
+site_name: Scherlok
+site_description: Zero-config data quality monitoring. Learns what "normal" looks like, then tells you when something changes.
+site_url: https://rbmuller.github.io/scherlok/
+repo_url: https://github.com/rbmuller/scherlok
+repo_name: rbmuller/scherlok
+edit_uri: edit/main/website/
+docs_dir: website
+site_dir: site
+copyright: MIT licensed. Built by Robson Bayer Müller.
+
+hooks:
+  - website/hooks/repo_links.py
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Connectors: connectors.md
+  - dbt:
+      - CLI integration: dbt.md
+      - dbt package: dbt-package.md
+  - CI/CD gate: ci-cd.md
+  - Alerts: alerts.md
+  - HTML dashboard: dashboard.md
+  - MCP server: mcp.md
+  - AI-explained alerts: explain.md
+  - Comparison: comparison.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md

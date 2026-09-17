@@ -2,7 +2,7 @@
 
 The `scherlok dashboard` command turns the local profile store into a single-file HTML report.
 
-![scherlok dashboard](../../../assets/dashboard-screenshot.png)
+![scherlok dashboard](https://raw.githubusercontent.com/rbmuller/scherlok/main/assets/dashboard-screenshot.png)
 
 ## Quick start
 
@@ -74,4 +74,4 @@ The dashboard is intentionally read-only. Anything that requires state, identity
 
 ## Contract with the detectors
 
-The dashboard is read-only and parser-driven. It does **not** mutate the SQLite schema or anomaly contract. Schema-drift rendering uses regex parsers ([`schema_parser.py`](schema_parser.py)) against the existing `detect_schema_drift` message format. If the message format ever changes, the parser tests will fail loudly.
+The dashboard is read-only and parser-driven. It does **not** mutate the SQLite schema or anomaly contract. Schema-drift rendering uses regex parsers ([`schema_parser.py`](https://github.com/rbmuller/scherlok/blob/main/src/scherlok/dashboard/schema_parser.py)) against the existing `detect_schema_drift` message format. If the message format ever changes, the parser tests will fail loudly.

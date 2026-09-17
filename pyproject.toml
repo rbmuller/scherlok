@@ -52,6 +52,9 @@ explain = [
 mcp = [
     "mcp>=1.2",
 ]
+docs = [
+    "mkdocs-material>=9.5",
+]
 dev = [
     "anthropic>=0.40",
     "duckdb>=0.9",
@@ -67,7 +70,8 @@ scherlok = "scherlok.cli:app"
 scherlok-mcp = "scherlok.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/rbmuller/scherlok"
+Homepage = "https://rbmuller.github.io/scherlok/"
+Documentation = "https://rbmuller.github.io/scherlok/"
 Repository = "https://github.com/rbmuller/scherlok"
 Issues = "https://github.com/rbmuller/scherlok/issues"
 

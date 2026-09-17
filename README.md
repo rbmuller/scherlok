@@ -8,6 +8,7 @@
 <a href="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml"><img src="https://github.com/rbmuller/scherlok/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://glama.ai/mcp/servers/rbmuller/scherlok"><img src="https://glama.ai/mcp/servers/rbmuller/scherlok/badges/score.svg" alt="Glama score"></a>
 <a href="https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok"><img src="https://img.shields.io/badge/MCP%20Registry-io.github.rbmuller%2Fscherlok-success?logo=anthropic" alt="MCP Registry"></a>
+<a href="https://rbmuller.github.io/scherlok/"><img src="https://img.shields.io/badge/docs-rbmuller.github.io%2Fscherlok-blue?logo=materialformkdocs&logoColor=white" alt="Documentation"></a>
 
 <br><br>
 
@@ -356,16 +357,18 @@ scherlok config --store gs://my-bucket/scherlok/profiles.db
 scherlok config --store az://my-container/scherlok/profiles.db
 ```
 
-## Why Not [Other Tool]?
+## How it compares
 
-| | Great Expectations | Soda | Monte Carlo | **Scherlok** |
-|---|---|---|---|---|
-| Setup time | Hours | 30 min | Weeks | **5 minutes** |
-| Config required | Hundreds of rules | YAML checks | Dashboard setup | **None** |
-| Anomaly detection | Manual thresholds | Paid feature | Yes | **Yes, free** |
-| Self-hosted | Yes | Limited | No (SaaS) | **Yes** |
-| CI/CD gate | Yes | Yes | No | **Yes** |
-| Price | Free | Freemium | $50-200K/yr | **Free, forever** |
+| | **Scherlok** | Elementary | Soda | Great Expectations | Monte Carlo |
+|---|---|---|---|---|---|
+| Open-source core | MIT | Apache-2.0 dbt package + CLI | Apache-2.0 Soda Core | Apache-2.0 GX Core | No (SaaS) |
+| Config before detection starts | **None** | YAML per anomaly test | SodaCL YAML checks | Expectations you declare | Monitors configured in the product |
+| Learns baselines in the free tier | **Yes, automatically** | Yes, with per-test config | No (needs Soda Library + Cloud) | No (validates declared expectations) | n/a |
+| Works without dbt | **Yes** | No | Yes | Yes | Yes |
+| Self-hosted | **Yes** | OSS yes; Cloud is managed | Core yes; Cloud is managed | Core yes; Cloud is managed | No |
+| Pricing | **Free** | OSS free; Cloud by seats and environments | Core free; Cloud has a free plan | Core free; Cloud has a free Developer option | Quote-based |
+
+Every claim links to the other tool's own documentation in the [full comparison](https://rbmuller.github.io/scherlok/comparison/).
 
 ## CLI Reference
 

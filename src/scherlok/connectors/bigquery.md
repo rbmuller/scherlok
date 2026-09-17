@@ -70,7 +70,7 @@ For a dataset with **T** tables averaging **C** columns each: ~`T + 2·T·C` bil
 
 **Recommendations for production:**
 
-- Prototype on a single small table with `scherlok investigate --select <table>` before pointing at the full dataset (the [`--select` filter](../../../README.md) limits scope).
+- Prototype on a single small table with `scherlok investigate --select <table>` before pointing at the full dataset (the [`--select` filter](https://github.com/rbmuller/scherlok#cli-reference) limits scope).
 - Monitor cost via `region-X.INFORMATION_SCHEMA.JOBS_BY_USER` filtering `user_email = '<scherlok-sa-email>'` for the first week.
 - Schedule `watch` on the cadence that matches your data — daily for slow-moving marts, hourly for ingest tables. Each run repeats the same scans.
 
@@ -87,7 +87,7 @@ scherlok dbt --project-dir ./my_dbt_project
 
 Scherlok auto-resolves the BQ connection from `profiles.yml`, discovers every materialized model (`table`/`incremental`/`view`/`materialized_view`), and profiles them. dbt-style ✓/✗ per model, with the lineage downstream-impact suffix on anomaly messages: *`Affects 3 downstream models: dim_revenue, mart_finance, dashboard_kpis`*.
 
-Full dbt integration docs: [src/scherlok/dbt/README.md](../dbt/README.md).
+Full dbt integration docs: [src/scherlok/dbt/README.md](https://github.com/rbmuller/scherlok/blob/main/src/scherlok/dbt/README.md).
 
 ## MCP + BigQuery (use it from Claude)
 

@@ -1,0 +1,1 @@
+--8<-- "src/scherlok/dbt/README.md"
