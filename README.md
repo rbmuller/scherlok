@@ -15,19 +15,23 @@
 
 <h1>Scherlok</h1>
 
-<p><strong>Your data broke in production. Again.</strong><br>
-Scherlok makes sure it doesn't happen next time.</p>
+<p><strong>Zero-config anomaly detection for your database tables.</strong><br>
+No YAML, no rules, no thresholds. Scherlok learns what "normal" looks like, then tells you when something changes.</p>
 
 </div>
+
+```bash
+pip install scherlok
+scherlok ci postgres://user:pass@host/db   # profiles on the first run, detects anomalies on every run after
+```
 
 <div align="center">
 
 <img src="examples/demo.svg" alt="Scherlok Demo" width="700">
 
-**Zero config. Zero YAML. Zero rules to write.**<br>
-Scherlok learns what "normal" looks like, then tells you when something changes.
-
 </div>
+
+Works with **PostgreSQL, BigQuery, Snowflake, MySQL, DuckDB** and **dbt**. Alerts go to Slack, Discord, Teams, email, or your CI exit code.
 
 ---
 
@@ -40,23 +44,6 @@ Every data team has the same nightmare:
 > A column starts returning **NULLs**. A table stops updating. Row counts drop **40% on a Tuesday**. Nobody knows until the CEO asks why the report looks weird.
 
 Current tools (Great Expectations, Soda, dbt tests) require you to **define what "correct" looks like** before you can detect what's wrong. Hundreds of rules. Dozens of YAML files. And you still miss things — because you can't write rules for problems you haven't imagined yet.
-
-## The Solution
-
-Scherlok takes the opposite approach: **learn first, then detect.**
-
-```bash
-scherlok connect postgres://user:pass@host/db   # connect once
-scherlok investigate                              # learn your data
-scherlok watch                                    # detect anomalies
-```
-
-Three commands. Five minutes. Done.
-
-After five valid profiles, Scherlok learns per-metric variability from the
-latest 30 profiles using robust historical baselines for volume, numeric mean
-shifts, NULL rates, and distinct counts. During cold start or when history is
-not usable, it keeps the conservative fixed defaults.
 
 ## What It Catches
 
@@ -71,6 +58,90 @@ not usable, it keeps the conservative fixed defaults.
 | **Cardinality explosion** | Status column went from 5 values to 500 | CRITICAL |
 
 Every anomaly is auto-scored: **INFO**, **WARNING**, or **CRITICAL**. No thresholds to configure.
+
+## How It Works
+
+Scherlok takes the opposite approach of rule-based tools: **learn first, then detect.**
+
+```bash
+scherlok connect postgres://user:pass@host/db   # connect once
+scherlok investigate                              # learn your data
+scherlok watch                                    # detect anomalies
+```
+
+Three commands. Five minutes. Done. (`scherlok ci <url>` runs all three in one step for pipelines.)
+
+After five valid profiles, Scherlok learns per-metric variability from the
+latest 30 profiles using robust historical baselines for volume, numeric mean
+shifts, NULL rates, and distinct counts. During cold start or when history is
+not usable, it keeps the conservative fixed defaults.
+
+### 1. `investigate` — Learn the patterns
+
+```bash
+$ scherlok investigate
+
+  Profiling 12 tables...
+  ✓ users         — 45,231 rows, 8 columns
+  ✓ orders        — 1,203,847 rows, 15 columns
+  ✓ products      — 892 rows, 12 columns
+  ...
+  Done. Profiles saved.
+```
+
+Scherlok profiles every table: row counts, column types, NULL rates, value distributions, freshness cadence, cardinality. Stores everything locally in SQLite.
+
+### 2. `watch` — Detect anomalies
+
+```bash
+$ scherlok watch
+
+  Checking 12 tables against learned profiles...
+
+  🔴 CRITICAL  orders    volume_drop     Row count dropped 52% (1,203,847 → 578,412)
+  🟡 WARNING   users     null_increase   Column "email": NULL rate 2.1% → 18.7%
+  🔵 INFO      products  distribution    Column "price": mean shifted 3.2σ
+
+  3 anomalies detected. Exit code: 1
+```
+
+### 3. Alert — Slack, CI/CD, or both
+
+```bash
+# Slack
+scherlok watch --webhook https://hooks.slack.com/services/...
+
+# Discord
+scherlok watch --webhook https://discord.com/api/webhooks/...
+
+# Microsoft Teams
+scherlok watch --webhook https://outlook.office.com/webhook/...
+
+# Any endpoint (generic JSON payload)
+scherlok watch --webhook https://my-api.com/alerts
+
+# CI/CD gate (fails pipeline on CRITICAL)
+scherlok watch --exit-code --fail-on critical
+```
+
+Auto-detects Slack, Discord, and Teams from the URL and formats the payload accordingly. Any other URL receives a generic JSON payload.
+
+## CI/CD Integration
+
+Use Scherlok as a data quality gate. The `ci` command does it in one line:
+
+```yaml
+# GitHub Actions
+- name: Data quality check
+  run: |
+    pip install scherlok
+    scherlok config --store s3://my-bucket/scherlok/profiles.db
+    scherlok ci ${{ secrets.DATABASE_URL }} \
+      --webhook ${{ secrets.SLACK_WEBHOOK }} \
+      --fail-on critical
+```
+
+If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
 
 ## Works with dbt
 
@@ -217,75 +288,6 @@ Works on `watch`, `ci`, `check`, `dbt`, and `dbt-run-and-watch`. On dbt projects
 - **How to turn it off** — it's opt-in; don't pass `--explain`. If the API call fails (no key, timeout, rate limit), the original alert is delivered unchanged with a one-line note. Alerting never blocks on the LLM.
 
 📖 Full docs: [explainer guide →](src/scherlok/explainer/README.md)
-
-## How It Works
-
-### 1. `investigate` — Learn the patterns
-
-```bash
-$ scherlok investigate
-
-  Profiling 12 tables...
-  ✓ users         — 45,231 rows, 8 columns
-  ✓ orders        — 1,203,847 rows, 15 columns
-  ✓ products      — 892 rows, 12 columns
-  ...
-  Done. Profiles saved.
-```
-
-Scherlok profiles every table: row counts, column types, NULL rates, value distributions, freshness cadence, cardinality. Stores everything locally in SQLite.
-
-### 2. `watch` — Detect anomalies
-
-```bash
-$ scherlok watch
-
-  Checking 12 tables against learned profiles...
-
-  🔴 CRITICAL  orders    volume_drop     Row count dropped 52% (1,203,847 → 578,412)
-  🟡 WARNING   users     null_increase   Column "email": NULL rate 2.1% → 18.7%
-  🔵 INFO      products  distribution    Column "price": mean shifted 3.2σ
-
-  3 anomalies detected. Exit code: 1
-```
-
-### 3. Alert — Slack, CI/CD, or both
-
-```bash
-# Slack
-scherlok watch --webhook https://hooks.slack.com/services/...
-
-# Discord
-scherlok watch --webhook https://discord.com/api/webhooks/...
-
-# Microsoft Teams
-scherlok watch --webhook https://outlook.office.com/webhook/...
-
-# Any endpoint (generic JSON payload)
-scherlok watch --webhook https://my-api.com/alerts
-
-# CI/CD gate (fails pipeline on CRITICAL)
-scherlok watch --exit-code --fail-on critical
-```
-
-Auto-detects Slack, Discord, and Teams from the URL and formats the payload accordingly. Any other URL receives a generic JSON payload.
-
-## CI/CD Integration
-
-Use Scherlok as a data quality gate. The `ci` command does it in one line:
-
-```yaml
-# GitHub Actions
-- name: Data quality check
-  run: |
-    pip install scherlok
-    scherlok config --store s3://my-bucket/scherlok/profiles.db
-    scherlok ci ${{ secrets.DATABASE_URL }} \
-      --webhook ${{ secrets.SLACK_WEBHOOK }} \
-      --fail-on critical
-```
-
-If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
 
 ## Email alerts
 
