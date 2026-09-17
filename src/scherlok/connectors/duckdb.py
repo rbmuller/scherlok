@@ -31,6 +31,12 @@ class DuckDBConnector(BaseConnector):
             self._last_error = self._classify_error(str(exc))
             return False
 
+    def close(self) -> None:
+        """Release the DuckDB connection so another writer can open the file."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
     def _database_path(self) -> str:
         """Return the DuckDB database path from a duckdb:// connection string."""
         parsed = urlparse(self.connection_string)

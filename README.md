@@ -25,6 +25,12 @@ pip install scherlok
 scherlok ci postgres://user:pass@host/db   # profiles on the first run, detects anomalies on every run after
 ```
 
+No database handy? The demo seeds one, learns it, breaks it, and catches it, in about a second:
+
+```bash
+uvx --from "scherlok[duckdb]" scherlok demo
+```
+
 <div align="center">
 
 <img src="examples/demo.svg" alt="Scherlok Demo" width="700">
@@ -375,6 +381,7 @@ scherlok history [--days N] [--output json]  Timeline of past anomalies
 scherlok report                 Detailed profile summary
 scherlok dashboard [--out .html] Generate self-contained HTML report
 scherlok config --store <url>   Set remote storage
+scherlok demo [--keep] [--output json]  Self-contained demo on a sample DuckDB (no database needed)
 scherlok version                Show version
 ```
 

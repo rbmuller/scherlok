@@ -24,6 +24,7 @@ from scherlok.alerter.exitcode import exit_code_for
 from scherlok.alerter.webhook import send_webhook
 from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
+from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
@@ -33,8 +34,8 @@ from scherlok.explainer import (
     format_unavailable_note,
 )
 from scherlok.output import error as out_error
+from scherlok.output import get_console, is_quiet, verbose_info
 from scherlok.output import info as out_info
-from scherlok.output import is_quiet, verbose_info
 from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
@@ -42,6 +43,11 @@ from scherlok.profiler.volume import profile_volume
 from scherlok.service import profile_and_detect
 from scherlok.store.remote import sync_context
 from scherlok.store.sqlite import ProfileStore
+
+OUTPUT_TEXT = "text"
+OUTPUT_JSON = "json"
+OUTPUT_FORMATS = (OUTPUT_TEXT, OUTPUT_JSON)
+
 
 if TYPE_CHECKING:
     from scherlok.dbt.manifest import DbtExposure
@@ -1457,6 +1463,42 @@ def history(
         tbl.add_row(detected, sev_styled, r["table"], r["type"], r["message"])
 
     console.print(tbl)
+
+
+@app.command()
+def demo(
+    directory: Path = typer.Option(
+        None, "--dir", help="Directory for the demo files (implies --keep).",
+    ),
+    keep: bool = typer.Option(
+        False, "--keep", help="Keep the demo database and profiles after the run.",
+    ),
+    output: str = typer.Option(
+        "text", "--output", help="Output format: text (default) or json.",
+    ),
+) -> None:
+    """Seed a sample warehouse, learn it, break it, catch it. No database needed.
+
+    Runs the whole loop against a throwaway DuckDB file in one directory;
+    nothing under ~/.scherlok is touched. Always exits 0 — it is a
+    demonstration, not a gate.
+
+    Example:
+        uvx --from "scherlok[duckdb]" scherlok demo
+        scherlok demo --keep
+    """
+    if output.lower() not in OUTPUT_FORMATS:
+        out_error(f"[red]Invalid --output value '{output}'. Use 'text' or 'json'.[/red]")
+        raise typer.Exit(code=1)
+    output = output.lower()
+    if not duckdb_available():
+        out_error(f"[red]{rich_escape(DUCKDB_MISSING_HINT)}[/red]")
+        raise typer.Exit(code=1)
+
+    console = get_console() if output == OUTPUT_TEXT else None
+    result = run_demo(directory=directory, keep=keep, console=console)
+    if output == OUTPUT_JSON:
+        typer.echo(json.dumps(result.to_dict(), indent=2))
 
 
 @app.command()

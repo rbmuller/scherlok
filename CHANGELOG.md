@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`scherlok demo`** — a self-contained walkthrough that needs no database: seeds a sample DuckDB warehouse (3 tables, 22,500 rows), learns a baseline, ships a "bad deploy" (60% of orders gone, e-mails nulled, free-text plans, a dropped column) and catches it with the real detectors, in about a second. Runs entirely inside one temporary directory and never touches `~/.scherlok`; `--keep`/`--dir` preserve the files, `--output json` emits the result for scripts. Requires the `duckdb` extra: `uvx --from "scherlok[duckdb]" scherlok demo`.
+- **`DuckDBConnector.close()`** — releases the file handle so another writer can open the database.
 - **MCP Registry publishing workflow** — `.github/workflows/publish-mcp.yml` publishes `server.json` to the official MCP Registry after each successful Release run (GitHub OIDC, no stored token), so the `io.github.rbmuller/scherlok` listing no longer lags behind PyPI.
 
 ## [1.0.1] — 2026-09-17
