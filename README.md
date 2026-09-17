@@ -199,9 +199,11 @@ Prefer staying inside dbt? Install Scherlok as a dbt package for native data qua
 ```yaml
 # packages.yml
 packages:
-  - package: rbmuller/scherlok
-    version: [">=1.0.0", "<2.0.0"]
+  - git: https://github.com/rbmuller/scherlok.git
+    revision: v1.0.1
 ```
+
+Once the dbt Package Hub listing lands ([dbt-labs/hubcap#456](https://github.com/dbt-labs/hubcap/pull/456)), this becomes `package: rbmuller/scherlok` with `version: [">=1.0.0", "<2.0.0"]`.
 
 ```yaml
 # schema.yml
@@ -414,6 +416,10 @@ We're especially looking for:
 - New database connectors (e.g. Databricks — see [#37](https://github.com/rbmuller/scherlok/issues/37))
 - Anomaly detection improvements
 - Documentation and examples
+
+## Star History
+
+<a href="https://star-history.com/#rbmuller/scherlok&Date"><img src="https://api.star-history.com/svg?repos=rbmuller/scherlok&type=Date" alt="Star History Chart" width="600"></a>
 
 ## License
 
