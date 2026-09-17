@@ -86,11 +86,12 @@ If your warehouse is one users wire up via dbt, add the adapter mapping in [`src
 
 For maintainers only:
 
-1. Bump `version` in `pyproject.toml` and `__version__` in `src/scherlok/__init__.py`
+1. Bump the version in all four places: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, and both `version` fields in `server.json` (`grep -rn "X.Y.Z"` on the previous version to catch every one; a partial bump is how v1.0.0 never reached PyPI)
 2. Move `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`
 3. PR + merge to main
 4. `git tag vX.Y.Z && git push origin vX.Y.Z`
 5. `.github/workflows/release.yml` runs tests, publishes to PyPI via trusted publishing, creates GitHub Release with auto-extracted notes
+6. `.github/workflows/publish-mcp.yml` then publishes `server.json` to the MCP Registry (GitHub OIDC). Check the listing at https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok; re-run it with `gh workflow run publish-mcp.yml --ref main` if needed
 
 ## Code of conduct
 

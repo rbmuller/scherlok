@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **MCP Registry publishing workflow** — `.github/workflows/publish-mcp.yml` publishes `server.json` to the official MCP Registry after each successful Release run (GitHub OIDC, no stored token), so the `io.github.rbmuller/scherlok` listing no longer lags behind PyPI.
+
 ## [1.0.1] — 2026-09-17
 
 ### Fixed
