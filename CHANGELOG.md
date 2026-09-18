@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-09-18
+
 ### Fixed
 - **MCP server reported an empty version** — `serverInfo.version` was blank in every `initialize` reply because the package version was never passed to the server class, so clients and registries listed the server without a version. It now reports `__version__` (mcp 2.x; mcp 1.x `FastMCP` takes no version parameter and is unaffected).
 - **Misleading error when an unsupported `mcp` is installed** — a release exposing neither `MCPServer` (mcp 2.x) nor `FastMCP` (mcp 1.x) produced "requires the 'mcp' package … re-install scherlok", which sends the operator down the wrong path. The message now names the installed version and the supported range. The `mcp` dependency is pinned to `>=1.2,<3` to match what is actually tested.

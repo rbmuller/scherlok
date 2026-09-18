@@ -8,7 +8,7 @@ Prefer staying inside dbt? Scherlok is also a native dbt package: data tests you
 # packages.yml
 packages:
   - git: https://github.com/rbmuller/scherlok.git
-    revision: v1.0.1
+    revision: v1.0.2
 ```
 
 Once the dbt Package Hub listing lands ([dbt-labs/hubcap#456](https://github.com/dbt-labs/hubcap/pull/456)), this becomes `package: rbmuller/scherlok` with `version: [">=1.0.0", "<2.0.0"]`. Requires dbt 1.6+.
