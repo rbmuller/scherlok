@@ -13,6 +13,8 @@ pip install scherlok
 
 The MCP server ships built-in since v0.7.0 — the `scherlok-mcp` console script (a stdio server) is installed alongside the `scherlok` CLI. (The legacy `pip install scherlok[mcp]` still works as a back-compat alias.)
 
+Works with **mcp 1.2+ and 2.x** (the server class was renamed from `FastMCP` to `MCPServer` in mcp 2.0; both are supported). Releases from 0.8.0 and earlier only support mcp 1.x, so pin `scherlok>=0.9.0` if your environment resolves mcp 2.x.
+
 ## Configure the connection (server-side)
 
 The connection string is resolved **on the server**, never passed by the model.

@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **MCP server reported an empty version** — `serverInfo.version` was blank in every `initialize` reply because the package version was never passed to the server class, so clients and registries listed the server without a version. It now reports `__version__` (mcp 2.x; mcp 1.x `FastMCP` takes no version parameter and is unaffected).
+- **Misleading error when an unsupported `mcp` is installed** — a release exposing neither `MCPServer` (mcp 2.x) nor `FastMCP` (mcp 1.x) produced "requires the 'mcp' package … re-install scherlok", which sends the operator down the wrong path. The message now names the installed version and the supported range. The `mcp` dependency is pinned to `>=1.2,<3` to match what is actually tested.
+
 ### Added
+- **stdio handshake test** — `tests/test_mcp_server.py` now spawns the installed `scherlok-mcp` entry point and speaks JSON-RPC over stdio (initialize + tools/list), the way an MCP client or a registry health check does. This is the layer where the two fixes above failed while every in-process test passed.
+- **`glama.json`** — declares repository maintainers for the Glama MCP listing.
 - **Documentation site** at https://rbmuller.github.io/scherlok/ (MkDocs Material, deployed from `main` by `.github/workflows/docs.yml`, strict build checked in CI). Includes a sourced [comparison](https://rbmuller.github.io/scherlok/comparison/) with Elementary, Soda, Great Expectations and Monte Carlo; the README table now links to it and no longer quotes unpublished competitor prices.
 - **`scherlok demo`** — a self-contained walkthrough that needs no database: seeds a sample DuckDB warehouse (3 tables, 22,500 rows), learns a baseline, ships a "bad deploy" (60% of orders gone, e-mails nulled, free-text plans, a dropped column) and catches it with the real detectors, in about a second. Runs entirely inside one temporary directory and never touches `~/.scherlok`; `--keep`/`--dir` preserve the files, `--output json` emits the result for scripts. Requires the `duckdb` extra: `uvx --from "scherlok[duckdb]" scherlok demo`.
 - **`DuckDBConnector.close()`** — releases the file handle so another writer can open the database.

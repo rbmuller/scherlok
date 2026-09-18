@@ -15,8 +15,10 @@ Security model (see src/scherlok/mcp/README.md):
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
+from scherlok import __version__
 from scherlok.config import ENV_CONNECTION, ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.connectors.base import BaseConnector
@@ -24,6 +26,10 @@ from scherlok.service import anomaly_to_dict, profile_and_detect, redact_connect
 from scherlok.store.sqlite import ProfileStore
 
 SERVER_NAME = "scherlok"
+
+# Supported `mcp` releases, kept in step with the dependency in pyproject.toml.
+SUPPORTED_MCP_RANGE = "mcp >=1.2,<3"
+SUPPORTED_MCP_SPEC = "mcp>=1.2,<3"
 
 # Output caps — keep any single tool result within a sane token budget.
 MAX_TABLES = 1000
@@ -205,25 +211,62 @@ def check(fail_on: str = "critical") -> dict[str, Any]:
 _TOOLS = [list_tables, investigate, watch, status, history, check]
 
 
-def build_server() -> Any:
-    """Construct and return an MCP server with all tools registered.
+def _installed_mcp_version() -> str | None:
+    """Return the installed `mcp` version, or None when the package is absent."""
+    from importlib.metadata import PackageNotFoundError, version
 
-    Imported lazily so `pip install scherlok` (without the `[mcp]` extra)
-    doesn't error on a missing `mcp` dependency until the server is built.
+    try:
+        return version("mcp")
+    except PackageNotFoundError:
+        return None
+
+
+def _server_class() -> Any:
+    """Return the server class of whichever supported `mcp` release is installed.
+
+    `FastMCP` was renamed to `MCPServer` in mcp 2.0, so both names are tried.
+    A missing package and an unsupported release are different problems for
+    the operator, so they get different messages.
     """
     try:
-        from mcp.server import MCPServer as _Server
+        from mcp.server import MCPServer
+
+        return MCPServer
     except ImportError:
-        try:
-            from mcp.server.fastmcp import FastMCP as _Server  # mcp <2.0
-        except ImportError as exc:
+        pass
+    try:
+        from mcp.server.fastmcp import FastMCP  # mcp <2.0
+
+        return FastMCP
+    except ImportError as exc:
+        installed = _installed_mcp_version()
+        if installed is None:
             raise ImportError(
                 "The MCP server requires the 'mcp' package, which ships with "
                 "scherlok by default. Re-install scherlok to pull it in: "
                 "pip install --upgrade scherlok"
             ) from exc
+        raise ImportError(
+            f"mcp {installed} is installed but exposes neither MCPServer "
+            f"(mcp 2.x) nor FastMCP (mcp 1.x). Scherlok supports "
+            f"{SUPPORTED_MCP_RANGE}: pip install '{SUPPORTED_MCP_SPEC}'"
+        ) from exc
 
-    server = _Server(SERVER_NAME)
+
+def build_server() -> Any:
+    """Construct and return an MCP server with all tools registered.
+
+    `mcp` is imported lazily so importing this module never depends on it.
+    """
+    server_cls = _server_class()
+
+    # mcp 2.x takes the server version and reports it in `serverInfo`; mcp 1.x
+    # FastMCP has no such parameter and would reject the keyword.
+    kwargs: dict[str, Any] = {}
+    if "version" in inspect.signature(server_cls).parameters:
+        kwargs["version"] = __version__
+
+    server = server_cls(SERVER_NAME, **kwargs)
     for fn in _TOOLS:
         server.tool()(fn)
     return server

@@ -3,15 +3,25 @@
 Strategy: drive the tools end-to-end against a real in-memory DuckDB
 connection (shared across calls via a patched `get_connector`) so the
 profile→detect→store wiring is exercised for real, not mocked. The protocol
-layer is smoke-tested by building the FastMCP server and listing its tools.
+layer is smoke-tested by building the server, and end-to-end by speaking
+JSON-RPC over stdio to the installed `scherlok-mcp` entry point.
 """
 
 from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import threading
+import time
 
 import pytest
+
+from scherlok import __version__
+from scherlok.mcp.server import SERVER_NAME
 
 _HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
 _HAS_MCP = importlib.util.find_spec("mcp") is not None
@@ -172,3 +182,110 @@ def test_build_server_registers_all_tools():
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
     assert names == {"list_tables", "investigate", "watch", "status", "history", "check"}
+
+
+# --- stdio transport -------------------------------------------------------
+#
+# The tests above call the tool functions directly. This one runs the published
+# entry point the way an MCP client (Claude Desktop, mcp-proxy, a registry's
+# health check) does: spawn `scherlok-mcp`, speak JSON-RPC over stdio, and read
+# back what the server advertises about itself.
+
+SERVER_COMMAND = shutil.which("scherlok-mcp")
+
+HANDSHAKE = [
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "scherlok-tests", "version": "1"},
+        },
+    },
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+]
+
+EXPECTED_TOOLS = {"list_tables", "investigate", "watch", "status", "history", "check"}
+
+HANDSHAKE_TIMEOUT_SECONDS = 60
+
+
+def _speak_stdio(command: str, messages: list[dict], expect_id: int, env: dict) -> dict:
+    """Send `messages` to an MCP server over stdio; return replies keyed by id.
+
+    stdout is drained on a thread and stdin is held open until the awaited
+    reply arrives: closing it right after writing races the server's shutdown
+    on EOF, which can cut off the last reply.
+    """
+    replies: dict[int, dict] = {}
+    process = subprocess.Popen(  # noqa: S603 - fixed command from shutil.which
+        [command],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+
+    def drain() -> None:
+        for line in process.stdout:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if "id" in message:
+                replies[message["id"]] = message
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        for message in messages:
+            process.stdin.write(json.dumps(message) + "\n")
+        process.stdin.flush()
+
+        deadline = time.monotonic() + HANDSHAKE_TIMEOUT_SECONDS
+        while expect_id not in replies and time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(0.05)
+    finally:
+        process.stdin.close()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        reader.join(timeout=10)
+
+    assert replies, f"no JSON-RPC replies: stderr={process.stderr.read()!r}"
+    return replies
+
+
+@pytest.mark.skipif(not _HAS_MCP, reason="mcp not installed")
+@pytest.mark.skipif(SERVER_COMMAND is None, reason="scherlok-mcp console script not installed")
+def test_stdio_handshake_advertises_version_and_tools(tmp_path):
+    """A client that speaks stdio gets a named, versioned server and every tool.
+
+    Regression for two failures that only surface over the wire: an empty
+    `serverInfo.version` (the package version was never passed to the server),
+    and an `mcp` release whose server class moved, which makes the process die
+    on startup instead of answering.
+    """
+    replies = _speak_stdio(
+        SERVER_COMMAND,
+        HANDSHAKE,
+        expect_id=2,
+        env={
+            **os.environ,
+            "SCHERLOK_CONNECTION": "duckdb:///:memory:",
+            "HOME": str(tmp_path),
+        },
+    )
+
+    server_info = replies[1]["result"]["serverInfo"]
+    assert server_info["name"] == SERVER_NAME
+    assert server_info["version"] == __version__, "serverInfo must carry the package version"
+
+    assert {tool["name"] for tool in replies[2]["result"]["tools"]} == EXPECTED_TOOLS
