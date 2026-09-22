@@ -7,6 +7,16 @@ results it reasons over, instead of shelling out and parsing text.
 
 ## Install
 
+### Claude Desktop: one click
+
+Download `scherlok-<version>.mcpb` from the [latest release](https://github.com/rbmuller/scherlok/releases/latest) and open it. Claude Desktop installs the extension, asks for one setting — your database connection string, stored as a secret — and the tools appear in the conversation.
+
+The bundle carries no dependencies of its own: on first launch `uv` installs the pinned `scherlok` release from a lockfile shipped inside it (about 90 MB, a few seconds, cached afterwards). It covers PostgreSQL, MySQL and DuckDB; for BigQuery and Snowflake use the CLI below, whose extras need a build toolchain on some platforms.
+
+Sources live in [`mcpb/`](https://github.com/rbmuller/scherlok/tree/main/mcpb).
+
+### Any other MCP client
+
 ```bash
 pip install scherlok
 ```

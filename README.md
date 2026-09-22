@@ -252,7 +252,11 @@ One self-contained HTML file (~28 KB): KPIs, per-table incidents grouped with fi
 
 ## Use it from an AI agent (MCP)
 
-Let Claude Code / Claude Desktop run data-quality checks directly:
+Let Claude Code / Claude Desktop run data-quality checks directly.
+
+**Claude Desktop:** download `scherlok-<version>.mcpb` from the [latest release](https://github.com/rbmuller/scherlok/releases/latest) and open it. One click, one setting (your connection string, stored as a secret).
+
+**Any other client:**
 
 ```bash
 pip install scherlok   # scherlok-mcp ships built-in since v0.7.0

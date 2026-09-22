@@ -1,0 +1,87 @@
+{
+  "manifest_version": "0.4",
+  "name": "scherlok",
+  "display_name": "Scherlok — data quality monitoring",
+  "version": "1.0.2",
+  "description": "Profile your database, learn what normal looks like, and let Claude tell you when something changed.",
+  "long_description": "Scherlok gives Claude read-only tools to monitor data quality in your warehouse.\n\nAsk it to profile your tables once, and it stores a baseline: row counts, column types, NULL rates, value distributions, freshness cadence and cardinality. From then on it can compare the current state against that baseline and report what drifted — volume drops and spikes, schema changes, stale tables, NULL surges, distribution shifts, cardinality explosions — each scored INFO, WARNING or CRITICAL. There are no rules or thresholds to write.\n\nThe connection string is resolved by the server from your settings and is never passed by the model. Every operation is read-only (SELECT and information_schema), there is no arbitrary-SQL tool, and results are capped so a single call cannot exhaust the conversation.\n\nWorks with PostgreSQL, MySQL and DuckDB. The command-line version adds BigQuery and Snowflake.",
+  "author": {
+    "name": "Robson Bayer Müller",
+    "url": "https://github.com/rbmuller"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rbmuller/scherlok.git"
+  },
+  "homepage": "https://rbmuller.github.io/scherlok/",
+  "documentation": "https://rbmuller.github.io/scherlok/mcp/",
+  "support": "https://github.com/rbmuller/scherlok/issues",
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": [
+    "data-quality",
+    "anomaly-detection",
+    "database",
+    "postgres",
+    "duckdb",
+    "monitoring"
+  ],
+  "server": {
+    "type": "uv",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "--locked",
+        "server/main.py"
+      ],
+      "env": {
+        "SCHERLOK_CONNECTION": "${user_config.connection_string}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "list_tables",
+      "description": "List the tables visible to the configured warehouse connection"
+    },
+    {
+      "name": "investigate",
+      "description": "Profile tables and store them as the baseline for future anomaly checks"
+    },
+    {
+      "name": "watch",
+      "description": "Profile tables and detect anomalies against the stored baseline"
+    },
+    {
+      "name": "status",
+      "description": "Report the current monitoring state"
+    },
+    {
+      "name": "history",
+      "description": "Return anomalies recorded in the last N days"
+    },
+    {
+      "name": "check",
+      "description": "Run a watch over all tables and return a CI-style pass/fail gate"
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  },
+  "user_config": {
+    "connection_string": {
+      "type": "string",
+      "title": "Database connection",
+      "description": "postgresql://user:password@host:5432/dbname — also mysql://user:password@host:3306/dbname or duckdb:///path/to/file.db. A read-only user is enough.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

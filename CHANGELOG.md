@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Claude Desktop extension** — `mcpb/` builds `scherlok-<version>.mcpb`, attached to every GitHub release. Opening it installs the MCP server in one click and asks only for the connection string, which is stored as a secret and never passed by the model. The bundle is 300 KB: it ships a `uv.lock` and installs the pinned release on first launch (~90 KB of metadata, ~90 MB of wheels, about four seconds cold, cached afterwards). PostgreSQL, MySQL and DuckDB; BigQuery and Snowflake stay CLI-only because their drivers need a build toolchain on some platforms. `cryptography` is held below 50 in the bundle because 49.0.0 dropped x86_64 macOS wheels, which would break a one-click install on an Intel Mac. CI validates and packs the bundle on every PR, and `tests/test_mcpb.py` fails if the manifest, the pin, the lockfile or the advertised tool list drift from the package.
+
 ## [1.0.2] — 2026-09-18
 
 ### Fixed

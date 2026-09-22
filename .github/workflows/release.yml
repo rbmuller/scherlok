@@ -43,6 +43,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history for changelog parsing
+      - name: Pack the Claude Desktop bundle
+        run: npx --yes @anthropic-ai/mcpb@latest pack mcpb "scherlok-${GITHUB_REF#refs/tags/v}.mcpb"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,4 +69,5 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --notes "$NOTES" \
-            --verify-tag
+            --verify-tag \
+            "scherlok-${VERSION}.mcpb#Claude Desktop extension (one-click install)"

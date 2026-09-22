@@ -1,0 +1,19 @@
+[project]
+name = "scherlok-mcpb"
+version = "1.0.2"
+description = "Claude Desktop bundle for the Scherlok MCP server"
+requires-python = ">=3.10"
+dependencies = [
+    # Pinned to the release this bundle ships with: tests/test_mcpb.py asserts
+    # the pin, the bundle version and the package version never drift apart.
+    "scherlok[duckdb,mysql]==1.0.2",
+    # cryptography reaches here through mcp -> pyjwt[crypto]. From 49.0.0 it
+    # publishes macOS wheels for arm64 only, so an Intel Mac would fall back to
+    # a Rust build and a one-click install would fail on a machine without a
+    # toolchain. 48.x still ships universal2 wheels.
+    "cryptography<50",
+]
+
+[tool.uv]
+# Scripts only — there is nothing here to build or install as a package.
+package = false
