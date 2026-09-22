@@ -87,9 +87,9 @@ If your warehouse is one users wire up via dbt, add the adapter mapping in [`src
 For maintainers only:
 
 1. Bump the version in all four package locations: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, and both `version` fields in `server.json` (`grep -rn "X.Y.Z"` on the previous version to catch every one; a partial bump is how v1.0.0 never reached PyPI)
-2. Bump the Claude Desktop bundle: `version` in `mcpb/manifest.json`, `version` and the `scherlok[...]==X.Y.Z` pin in `mcpb/pyproject.toml`, then `cd mcpb && uv lock`
+2. Bump the Claude Desktop bundle: `version` in `mcpb/manifest.json`, plus `version` and the `scherlok[...]>=X.Y.Z` floor in `mcpb/pyproject.toml` (no lockfile — the bundle is packed during the release that publishes this version)
 3. Move `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`
-4. PR + merge to main — `tests/test_mcpb.py` fails the PR if the manifest, the pin or the lockfile drifted from the package version
+4. PR + merge to main — `tests/test_mcpb.py` fails the PR if the bundle manifest or its `scherlok` floor drifted from the package version
 5. `git tag vX.Y.Z && git push origin vX.Y.Z`
 6. `.github/workflows/release.yml` runs tests, publishes to PyPI via trusted publishing, packs `scherlok-X.Y.Z.mcpb` and creates the GitHub Release with auto-extracted notes and the bundle attached
 7. `.github/workflows/publish-mcp.yml` then publishes `server.json` to the MCP Registry (GitHub OIDC). Check the listing at https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok; re-run it with `gh workflow run publish-mcp.yml --ref main` if needed

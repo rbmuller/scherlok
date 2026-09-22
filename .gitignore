@@ -47,5 +47,6 @@ logs/
 # MkDocs build output
 site/
 
-# Packed Claude Desktop bundles
+# Packed Claude Desktop bundles, and the lock uv writes when testing one
 *.mcpb
+mcpb/uv.lock
