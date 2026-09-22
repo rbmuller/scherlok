@@ -46,3 +46,6 @@ logs/
 
 # MkDocs build output
 site/
+
+# Packed Claude Desktop bundles
+*.mcpb

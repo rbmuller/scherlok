@@ -57,10 +57,10 @@ Subject line ≤72 chars. Body explains the *why*, not the *what*. Multi-line is
 
 1. **Branch** from `main` — `feat/<short-description>` or `fix/<short-description>`
 2. **One PR per logical change.** Don't bundle a feature with unrelated cleanup
-3. **Run `ruff check src/ tests/` and `pytest` locally** before pushing — CI mirrors these
-4. **Open the PR with a body that covers**: what changed, why, how to test, screenshots if UI
-5. **Wait for review** — single approval required to merge
-6. **Squash merge** is the default
+4. **Run `ruff check src/ tests/` and `pytest` locally** before pushing — CI mirrors these
+5. **Open the PR with a body that covers**: what changed, why, how to test, screenshots if UI
+6. **Wait for review** — single approval required to merge
+7. **Squash merge** is the default
 
 ## Adding a new connector
 
@@ -68,9 +68,9 @@ The fastest path is to read [`postgres.py`](src/scherlok/connectors/postgres.py)
 
 1. Create `src/scherlok/connectors/<name>.py` extending `BaseConnector`
 2. Register the scheme(s) in [`src/scherlok/connectors/__init__.py`](src/scherlok/connectors/__init__.py); wrap the import in `try/except ImportError` if the driver is heavy
-3. Add the optional dependency in `pyproject.toml` under `[project.optional-dependencies]`
-4. Add tests in `tests/test_<name>.py` using mocks (see existing connector tests)
-5. Document in the README's "Supported adapters" section
+4. Add the optional dependency in `pyproject.toml` under `[project.optional-dependencies]`
+5. Add tests in `tests/test_<name>.py` using mocks (see existing connector tests)
+6. Document in the README's "Supported adapters" section
 
 If your warehouse is one users wire up via dbt, add the adapter mapping in [`src/scherlok/dbt/profiles.py`](src/scherlok/dbt/profiles.py) too.
 
@@ -80,18 +80,19 @@ If your warehouse is one users wire up via dbt, add the adapter mapping in [`src
 
 1. Create `src/scherlok/alerter/<name>.py` with a `send_<name>(target, anomalies)` function
 2. Wire it into the dispatch path in [`src/scherlok/cli.py`](src/scherlok/cli.py) (look for `_dispatch_alerts`)
-3. Add tests with mocked HTTP / SMTP
+4. Add tests with mocked HTTP / SMTP
 
 ## Release process
 
 For maintainers only:
 
-1. Bump the version in all four places: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, and both `version` fields in `server.json` (`grep -rn "X.Y.Z"` on the previous version to catch every one; a partial bump is how v1.0.0 never reached PyPI)
-2. Move `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`
-3. PR + merge to main
-4. `git tag vX.Y.Z && git push origin vX.Y.Z`
-5. `.github/workflows/release.yml` runs tests, publishes to PyPI via trusted publishing, creates GitHub Release with auto-extracted notes
-6. `.github/workflows/publish-mcp.yml` then publishes `server.json` to the MCP Registry (GitHub OIDC). Check the listing at https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok; re-run it with `gh workflow run publish-mcp.yml --ref main` if needed
+1. Bump the version in all four package locations: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, and both `version` fields in `server.json` (`grep -rn "X.Y.Z"` on the previous version to catch every one; a partial bump is how v1.0.0 never reached PyPI)
+2. Bump the Claude Desktop bundle: `version` in `mcpb/manifest.json`, `version` and the `scherlok[...]==X.Y.Z` pin in `mcpb/pyproject.toml`, then `cd mcpb && uv lock`
+3. Move `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`
+4. PR + merge to main — `tests/test_mcpb.py` fails the PR if the manifest, the pin or the lockfile drifted from the package version
+5. `git tag vX.Y.Z && git push origin vX.Y.Z`
+6. `.github/workflows/release.yml` runs tests, publishes to PyPI via trusted publishing, packs `scherlok-X.Y.Z.mcpb` and creates the GitHub Release with auto-extracted notes and the bundle attached
+7. `.github/workflows/publish-mcp.yml` then publishes `server.json` to the MCP Registry (GitHub OIDC). Check the listing at https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok; re-run it with `gh workflow run publish-mcp.yml --ref main` if needed
 
 ## Code of conduct
 

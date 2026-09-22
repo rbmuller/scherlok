@@ -35,3 +35,12 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[docs]"
       - run: mkdocs build --strict
+
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the Claude Desktop manifest
+        run: npx --yes @anthropic-ai/mcpb@latest validate mcpb/manifest.json
+      - name: Pack the bundle
+        run: npx --yes @anthropic-ai/mcpb@latest pack mcpb /tmp/scherlok.mcpb
