@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+# Resolved at install time; see pyproject.toml
+uv.lock

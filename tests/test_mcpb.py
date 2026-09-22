@@ -5,8 +5,12 @@ exactly what the package provides: the same version, the same tools, the same
 entry point. Nothing here needs the `mcpb` CLI or a network — these are the
 drift guards a manifest validator cannot give us.
 
-The bundle's `pyproject.toml` is read as text rather than parsed: `tomllib` is
-3.11+ and this package still supports 3.10.
+The bundle carries no lockfile: it is packed during the release that publishes
+the version it depends on, so the requirement is a floor that these tests keep
+equal to the package version.
+
+Its `pyproject.toml` is read as text rather than parsed: `tomllib` is 3.11+ and
+this package still supports 3.10.
 """
 
 from __future__ import annotations
@@ -22,7 +26,6 @@ from scherlok import __version__
 BUNDLE_DIR = Path(__file__).resolve().parents[1] / "mcpb"
 MANIFEST_PATH = BUNDLE_DIR / "manifest.json"
 PYPROJECT_PATH = BUNDLE_DIR / "pyproject.toml"
-LOCKFILE_PATH = BUNDLE_DIR / "uv.lock"
 
 pytestmark = pytest.mark.skipif(not MANIFEST_PATH.is_file(), reason="bundle not present")
 
@@ -42,21 +45,15 @@ def test_manifest_version_matches_the_package(manifest):
     assert manifest["version"] == __version__
 
 
-def test_bundle_pins_this_exact_release(bundle_pyproject):
-    """`uv run --locked` installs whatever is pinned here, so it must be this version."""
+def test_bundle_requires_this_release_or_later(bundle_pyproject):
+    """The floor must be this version: a lower one would install a stale server."""
     # `scherlok-mcpb` is the bundle's own project name, so the requirement is
-    # matched on the `==` rather than on the prefix alone.
-    pins = re.findall(r'"scherlok(?:\[[^\]]*\])?==([^",\s]+)"', bundle_pyproject)
-    assert len(pins) == 1, f"expected exactly one pinned scherlok requirement, got {pins}"
-    assert pins[0] == __version__
+    # matched on the `>=` rather than on the prefix alone.
+    floors = re.findall(r'"scherlok(?:\[[^\]]*\])?>=([^",\s]+)', bundle_pyproject)
+    assert len(floors) == 1, f"expected exactly one scherlok requirement, got {floors}"
+    assert floors[0] == __version__
     assert f'version = "{__version__}"' in bundle_pyproject
-
-
-def test_lockfile_agrees_with_the_pin():
-    lock = LOCKFILE_PATH.read_text()
-    assert f'name = "scherlok"\nversion = "{__version__}"' in lock, (
-        "uv.lock is stale — run `uv lock` in mcpb/ after a version bump"
-    )
+    assert "<2" in bundle_pyproject, "cap the major so a 2.x release cannot break installs"
 
 
 def test_manifest_tools_match_the_registered_tools(manifest):
@@ -85,7 +82,10 @@ def test_connection_is_user_supplied_and_marked_sensitive(manifest):
     )
 
 
-def test_install_is_locked(manifest):
+def test_server_runs_from_the_bundle_directory(manifest):
     args = manifest["server"]["mcp_config"]["args"]
-    assert "--locked" in args, "without --locked, uv may resolve past the tested lockfile"
-    assert LOCKFILE_PATH.is_file()
+    assert args[:3] == ["run", "--directory", "${__dirname}"]
+    assert "--locked" not in args, "the bundle ships no lockfile; --locked would fail at launch"
+    assert not (BUNDLE_DIR / "uv.lock").exists(), (
+        "a committed lockfile could only pin the previous release — see mcpb/pyproject.toml"
+    )
