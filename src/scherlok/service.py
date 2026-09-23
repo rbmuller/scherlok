@@ -84,7 +84,13 @@ def profile_and_detect(
             )
             anomalies.extend(
                 detect_cardinality_anomalies(
-                    table, col_name, current_dist, stored_dist, history=distribution_history
+                    table,
+                    col_name,
+                    current_dist,
+                    stored_dist,
+                    current_vol,
+                    stored_vol,
+                    history=distribution_history,
                 )
             )
         store.save_profile(table, f"distribution:{col_name}", current_dist)

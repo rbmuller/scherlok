@@ -300,3 +300,152 @@ class TestCardinalityDetector:
         stored = {"distinct_count": 0}
         anomalies = detect_cardinality_anomalies("t", "col", current, stored)
         assert len(anomalies) == 0
+
+
+class TestCardinalityNearUniqueColumns:
+    """Use distinct ratio for columns that were historically near-unique."""
+
+    STORED_DIST = {"distinct_count": 1000}
+    STORED_VOL = {"row_count": 1000}
+
+    def test_volume_drop_on_unique_column_is_silent(self):
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "id",
+            {"distinct_count": 400},
+            self.STORED_DIST,
+            {"row_count": 400},
+            self.STORED_VOL,
+        )
+        assert anomalies == []
+
+    def test_duplicates_on_unique_column_still_fire(self):
+        # An exact 50% uniqueness loss is CRITICAL (>= on both bands,
+        # matching the absolute path).
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "id",
+            {"distinct_count": 500},
+            self.STORED_DIST,
+            {"row_count": 1000},
+            self.STORED_VOL,
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+        assert "decreased" in anomalies[0]["message"]
+        assert "distinct ratio" in anomalies[0]["message"]
+
+    def test_exact_warning_boundary_fires_despite_float_repr(self):
+        # 1 - 0.9 is 0.09999999999999998 in binary floats; a clean 10%
+        # loss must still warn.
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "id",
+            {"distinct_count": 900},
+            self.STORED_DIST,
+            {"row_count": 1000},
+            self.STORED_VOL,
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.WARNING
+        assert "distinct ratio" in anomalies[0]["message"]
+
+    def test_partial_loss_below_critical_stays_warning(self):
+        # 1000 -> 800 is a 20% uniqueness loss: clearly warning, and clear
+        # of the 10% float edge.
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "id",
+            {"distinct_count": 800},
+            self.STORED_DIST,
+            {"row_count": 1000},
+            self.STORED_VOL,
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.WARNING
+        assert "distinct ratio" in anomalies[0]["message"]
+
+    def test_nulling_unique_values_is_silent(self):
+        # 20% of a unique e-mail column nulled: 1,600 remaining values are
+        # still distinct, so the non-null ratio is unchanged and nothing fires.
+        anomalies = detect_cardinality_anomalies(
+            "users",
+            "email",
+            {"distinct_count": 1600, "null_count": 400},
+            {"distinct_count": 2000, "null_count": 0},
+            {"row_count": 2000},
+            {"row_count": 2000},
+        )
+        assert anomalies == []
+
+    def test_null_aware_ratio_still_fires_on_real_duplicates(self):
+        # Same 20% NULLs, but only 800 distinct among the 1,600 non-null:
+        # uniqueness halved, so it must fire.
+        anomalies = detect_cardinality_anomalies(
+            "users",
+            "email",
+            {"distinct_count": 800, "null_count": 400},
+            {"distinct_count": 2000, "null_count": 0},
+            {"row_count": 2000},
+            {"row_count": 2000},
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+        assert "distinct ratio" in anomalies[0]["message"]
+
+    def test_low_cardinality_column_keeps_absolute_comparison(self):
+        anomalies = detect_cardinality_anomalies(
+            "users",
+            "plan",
+            {"distinct_count": 605},
+            {"distinct_count": 5},
+            {"row_count": 400},
+            {"row_count": 1000},
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+        assert "distinct values" in anomalies[0]["message"]
+
+    def test_falls_back_to_absolute_without_volume_profiles(self):
+        anomalies = detect_cardinality_anomalies(
+            "orders", "id", {"distinct_count": 400}, self.STORED_DIST
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.WARNING
+
+    def test_falls_back_to_absolute_on_zero_row_counts(self):
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "id",
+            {"distinct_count": 400},
+            self.STORED_DIST,
+            {"row_count": 0},
+            {"row_count": 0},
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.WARNING
+
+    def test_column_just_below_unique_threshold_uses_absolute(self):
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "customer_id",
+            {"distinct_count": 360},
+            {"distinct_count": 900},
+            {"row_count": 400},
+            {"row_count": 1000},
+        )
+        assert len(anomalies) == 1
+        assert "distinct values" in anomalies[0]["message"]
+
+    def test_large_loss_of_uniqueness_is_critical(self):
+        anomalies = detect_cardinality_anomalies(
+            "orders",
+            "id",
+            {"distinct_count": 100},
+            self.STORED_DIST,
+            {"row_count": 1000},
+            self.STORED_VOL,
+        )
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+        assert "distinct ratio" in anomalies[0]["message"]
