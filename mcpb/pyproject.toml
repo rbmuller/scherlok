@@ -1,6 +1,6 @@
 [project]
 name = "scherlok-mcpb"
-version = "1.0.3"
+version = "1.0.4"
 description = "Claude Desktop bundle for the Scherlok MCP server"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,7 +9,7 @@ dependencies = [
     # resolve against the *previous* release. The floor is raised on every
     # release and tests/test_mcpb.py keeps it equal to the package version, so
     # an installed extension gets this release or a later 1.x fix.
-    "scherlok[duckdb,mysql]>=1.0.3,<2",
+    "scherlok[duckdb,mysql]>=1.0.4,<2",
     # cryptography reaches here through mcp -> pyjwt[crypto]. From 49.0.0 it
     # publishes macOS wheels for arm64 only, so an Intel Mac would fall back to
     # a Rust build and a one-click install would fail on a machine without a
