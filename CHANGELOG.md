@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-09-24
+
 ### Fixed
 - **Cardinality noise on unique columns** — deleting rows also drops the distinct count of a unique `id` or timestamp column, so a single volume drop fired a `cardinality_change` warning per unique column on top of `volume_drop`. For columns the stored profile shows as near-unique (95% or more of non-NULL rows distinct), the detector now compares the distinct *ratio* rather than the absolute count, with thresholds sized for a bounded ratio (10% warning, 50% critical, inclusive). NULLs are excluded from the denominator, so nulling values in a unique column no longer reads as lost uniqueness — the nullability detector already reports that. Low-cardinality columns and callers without volume profiles keep the previous behaviour. Thanks to [@bferanmi806-sketch](https://github.com/bferanmi806-sketch). ([#94](https://github.com/rbmuller/scherlok/issues/94), [#97](https://github.com/rbmuller/scherlok/pull/97))
 

@@ -207,7 +207,7 @@ Prefer staying inside dbt? Install Scherlok as a dbt package for native data qua
 # packages.yml
 packages:
   - git: https://github.com/rbmuller/scherlok.git
-    revision: v1.0.2
+    revision: v1.0.4
 ```
 
 Once the dbt Package Hub listing lands ([dbt-labs/hubcap#456](https://github.com/dbt-labs/hubcap/pull/456)), this becomes `package: rbmuller/scherlok` with `version: [">=1.0.0", "<2.0.0"]`.

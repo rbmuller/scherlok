@@ -86,7 +86,7 @@ If your warehouse is one users wire up via dbt, add the adapter mapping in [`src
 
 For maintainers only:
 
-1. Bump the version in all four package locations: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, and both `version` fields in `server.json` (`grep -rn "X.Y.Z"` on the previous version to catch every one; a partial bump is how v1.0.0 never reached PyPI)
+1. Bump the version everywhere it is stated: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, both `version` fields in `server.json`, and the `revision: vX.Y.Z` dbt install snippet in `README.md` and `website/dbt-package.md`. `tests/test_release_versions.py` fails if any of them disagree (a partial bump is how v1.0.0 never reached PyPI)
 2. Bump the Claude Desktop bundle: `version` in `mcpb/manifest.json`, plus `version` and the `scherlok[...]>=X.Y.Z` floor in `mcpb/pyproject.toml` (no lockfile — the bundle is packed during the release that publishes this version)
 3. Move `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`
 4. PR + merge to main — `tests/test_mcpb.py` fails the PR if the bundle manifest or its `scherlok` floor drifted from the package version

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scherlok"
-version = "1.0.3"
+version = "1.0.4"
 description = "A detective for your data. Zero-config data quality monitoring."
 readme = "README.md"
 license = "MIT"
