@@ -147,6 +147,29 @@ class ProfileStore:
             for row in rows
         ]
 
+    def get_latest_anomaly_per_table(self) -> dict[str, dict[str, str]]:
+        """Latest anomaly for every table in one query.
+
+        Latest means highest detected_at, with the anomaly id as the
+        deterministic tie-breaker when timestamps match. No history
+        window: a table that fired long ago still reports it.
+        """
+        rows = self._conn.execute(
+            "SELECT table_name, anomaly_type, severity, detected_at FROM ("
+            "SELECT table_name, anomaly_type, severity, detected_at, "
+            "ROW_NUMBER() OVER (PARTITION BY table_name "
+            "ORDER BY detected_at DESC, id DESC) AS rn FROM anomalies"
+            ") WHERE rn = 1",
+        ).fetchall()
+        return {
+            row["table_name"]: {
+                "type": row["anomaly_type"],
+                "severity": row["severity"],
+                "detected_at": row["detected_at"],
+            }
+            for row in rows
+        }
+
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
