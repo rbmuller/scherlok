@@ -1341,6 +1341,23 @@ _STATUS_RICH = {
 }
 
 
+def _relative_age(detected_at: str, now: datetime | None = None) -> str:
+    """Short relative age ("2h ago") for a stored ISO timestamp."""
+    past = datetime.fromisoformat(detected_at)
+    if past.tzinfo is None:
+        past = past.replace(tzinfo=timezone.utc)
+    seconds = max(0, int(((now or datetime.now(timezone.utc)) - past).total_seconds()))
+    minutes, _ = divmod(seconds, 60)
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours, _ = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h ago"
+    return f"{hours // 24}d ago"
+
+
 @app.command()
 def status(
     output: str = typer.Option(
@@ -1374,6 +1391,7 @@ def status(
         tables = connector.list_tables()
 
         records: list[dict] = []
+        latest = store.get_latest_anomaly_per_table()
         for table in tables:
             vol = store.get_latest_profile(table, "volume")
             sch = store.get_latest_profile(table, "schema")
@@ -1383,6 +1401,7 @@ def status(
                 "columns": len(sch["columns"]) if sch else None,
                 "status": _table_health(connector, store, table, vol, sch),
                 "last_profiled": vol.get("timestamp") if vol else None,
+                "last_anomaly": latest.get(table),
             })
 
         if json_mode:
@@ -1394,13 +1413,21 @@ def status(
             tbl.add_column("Columns", justify="right")
             tbl.add_column("Last Profiled")
             tbl.add_column("Status")
+            tbl.add_column("Last Anomaly")
             for r in records:
+                anomaly = r["last_anomaly"]
+                last = (
+                    f"{anomaly['type']} · {_relative_age(anomaly['detected_at'])}"
+                    if anomaly
+                    else ""
+                )
                 tbl.add_row(
                     r["table"],
                     str(r["rows"]) if r["rows"] is not None else "—",
                     str(r["columns"]) if r["columns"] is not None else "—",
                     r["last_profiled"] or "—",
                     _STATUS_RICH[r["status"]],
+                    last,
                 )
             console.print(tbl)
     finally:

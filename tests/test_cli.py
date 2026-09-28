@@ -172,6 +172,7 @@ class TestStatusJson:
                 "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
                 "schema": {"columns": [{"name": "id"}]},
             }.get(pt)
+            store.get_latest_anomaly_per_table.return_value = {}
 
             result = runner.invoke(app, ["status", "--output", "json"])
 
@@ -185,6 +186,7 @@ class TestStatusJson:
             "columns": 1,
             "status": "healthy",
             "last_profiled": "2026-08-31T12:00:00+00:00",
+            "last_anomaly": None,
         }
 
     def test_unprofiled_table_has_null_fields(self):
@@ -197,6 +199,7 @@ class TestStatusJson:
             store = MagicMock()
             mock_store_cls.return_value = store
             store.get_latest_profile.return_value = None
+            store.get_latest_anomaly_per_table.return_value = {}
 
             result = runner.invoke(app, ["status", "--output", "json"])
 
@@ -205,6 +208,7 @@ class TestStatusJson:
         assert data[0]["columns"] is None
         assert data[0]["last_profiled"] is None
         assert data[0]["status"] == "unknown"
+        assert data[0]["last_anomaly"] is None
 
     def test_multiple_tables(self):
         connector = _mock_connector(tables=["orders", "users"])
@@ -219,6 +223,7 @@ class TestStatusJson:
                 "volume": {"row_count": 50, "timestamp": "2026-08-30T00:00:00+00:00"},
                 "schema": {"columns": [{"name": "id"}, {"name": "name"}]},
             }.get(pt)
+            store.get_latest_anomaly_per_table.return_value = {}
 
             result = runner.invoke(app, ["status", "--output", "json"])
 
@@ -242,6 +247,7 @@ class TestStatusJson:
                 "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
                 "schema": {"columns": [{"name": "id"}]},
             }.get(pt)
+            store.get_latest_anomaly_per_table.return_value = {}
 
             result = runner.invoke(app, ["status"])
 
@@ -249,10 +255,120 @@ class TestStatusJson:
         output = ANSI_RE.sub("", result.output)
         assert "Table Health" in output
         assert "users" in output
+        assert "Last Anomaly" in output
+
+    def test_json_includes_last_anomaly(self):
+        connector = _mock_connector()
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", return_value="critical"),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.side_effect = lambda _t, pt: {
+                "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
+                "schema": {"columns": [{"name": "id"}]},
+            }.get(pt)
+            store.get_latest_anomaly_per_table.return_value = {
+                "users": {
+                    "type": "volume_drop",
+                    "severity": "CRITICAL",
+                    "detected_at": "2026-08-31T10:00:00+00:00",
+                }
+            }
+
+            result = runner.invoke(app, ["status", "--output", "json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]["last_anomaly"] == {
+            "type": "volume_drop",
+            "severity": "CRITICAL",
+            "detected_at": "2026-08-31T10:00:00+00:00",
+        }
+        assert data[0]["table"] == "users"
+        assert data[0]["status"] == "critical"
+
+    def test_text_shows_last_anomaly_column(self):
+        from datetime import datetime, timedelta, timezone
+
+        detected_at = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        connector = _mock_connector()
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", return_value="critical"),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.side_effect = lambda _t, pt: {
+                "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
+                "schema": {"columns": [{"name": "id"}]},
+            }.get(pt)
+            store.get_latest_anomaly_per_table.return_value = {
+                "users": {
+                    "type": "volume_drop",
+                    "severity": "CRITICAL",
+                    "detected_at": detected_at,
+                }
+            }
+
+            result = runner.invoke(
+                app, ["status"], env={"NO_COLOR": "1", "COLUMNS": "200"}
+            )
+
+        assert result.exit_code == 0
+        output = ANSI_RE.sub("", result.output)
+        assert "Last Anomaly" in output
+        assert "volume_drop · 2h ago" in output
+
+    def test_text_leaves_last_anomaly_empty_without_anomalies(self):
+        connector = _mock_connector()
+        with (
+            patch("scherlok.cli._get_connector_or_exit", return_value=connector),
+            patch("scherlok.cli.ProfileStore") as mock_store_cls,
+            patch("scherlok.cli._table_health", return_value="healthy"),
+        ):
+            store = MagicMock()
+            mock_store_cls.return_value = store
+            store.get_latest_profile.side_effect = lambda _t, pt: {
+                "volume": {"row_count": 100, "timestamp": "2026-08-31T12:00:00+00:00"},
+                "schema": {"columns": [{"name": "id"}]},
+            }.get(pt)
+            store.get_latest_anomaly_per_table.return_value = {}
+
+            result = runner.invoke(app, ["status"])
+
+        assert result.exit_code == 0
+        output = ANSI_RE.sub("", result.output)
+        assert "Last Anomaly" in output
+        assert "ago" not in output
 
     def test_invalid_output_value_exits_1(self):
         result = runner.invoke(app, ["status", "--output", "xml"])
         assert result.exit_code == 1
+
+
+def test_relative_age_formats_minutes_hours_days():
+    from datetime import datetime, timezone
+
+    from scherlok.cli import _relative_age
+
+    now = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    assert _relative_age("2026-09-01T11:59:30+00:00", now) == "just now"
+    assert _relative_age("2026-09-01T11:15:00+00:00", now) == "45m ago"
+    assert _relative_age("2026-09-01T10:00:00+00:00", now) == "2h ago"
+    assert _relative_age("2026-08-29T12:00:00+00:00", now) == "3d ago"
+
+
+def test_relative_age_clamps_future_timestamps():
+    from datetime import datetime, timezone
+
+    from scherlok.cli import _relative_age
+
+    now = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    assert _relative_age("2026-09-01T13:00:00+00:00", now) == "just now"
 
 
 class TestHistoryJson:

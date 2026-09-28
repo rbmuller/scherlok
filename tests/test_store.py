@@ -99,3 +99,88 @@ class TestProfileStore:
         history = store.get_anomaly_history(days=30)
         assert history == []
         store.close()
+
+    def test_latest_anomaly_per_table(self):
+        store = _temp_store()
+        store.save_anomalies([
+            {
+                "table": "users",
+                "type": "volume_drop",
+                "severity": Severity.CRITICAL,
+                "message": "Row count dropped 60%",
+            },
+            {
+                "table": "orders",
+                "type": "schema_drift",
+                "severity": Severity.WARNING,
+                "message": "Column added: email",
+            },
+        ])
+        store.save_anomalies([
+            {
+                "table": "users",
+                "type": "freshness_gap",
+                "severity": Severity.WARNING,
+                "message": "Table is stale",
+            },
+        ])
+        latest = store.get_latest_anomaly_per_table()
+        assert latest["users"]["type"] == "freshness_gap"
+        assert latest["users"]["severity"] == "WARNING"
+        assert latest["users"]["detected_at"]
+        assert latest["orders"] == {
+            "type": "schema_drift",
+            "severity": "WARNING",
+            "detected_at": latest["orders"]["detected_at"],
+        }
+        assert "payments" not in latest
+        store.close()
+
+    def test_latest_anomaly_per_table_tie_breaks_on_id(self):
+        store = _temp_store()
+        detected_at = "2026-09-01T00:00:00+00:00"
+        for anomaly_type, severity, message in [
+            ("volume_drop", "CRITICAL", "first"),
+            ("schema_drift", "WARNING", "second"),
+        ]:
+            store._conn.execute(
+                "INSERT INTO anomalies "
+                "(table_name, anomaly_type, severity, message, detected_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("users", anomaly_type, severity, message, detected_at),
+            )
+        store._conn.commit()
+        latest = store.get_latest_anomaly_per_table()
+        assert latest["users"]["type"] == "schema_drift"
+        store.close()
+
+    def test_latest_anomaly_per_table_empty(self):
+        store = _temp_store()
+        assert store.get_latest_anomaly_per_table() == {}
+        store.close()
+
+    def test_latest_anomaly_per_table_issues_one_query(self):
+        store = _temp_store()
+        store.save_anomalies([
+            {
+                "table": "users",
+                "type": "volume_drop",
+                "severity": Severity.CRITICAL,
+                "message": "Row count dropped 60%",
+            },
+            {
+                "table": "orders",
+                "type": "schema_drift",
+                "severity": Severity.WARNING,
+                "message": "Column added: email",
+            },
+        ])
+        seen: list[str] = []
+        store._conn.set_trace_callback(seen.append)
+        try:
+            store.get_latest_anomaly_per_table()
+        finally:
+            store._conn.set_trace_callback(None)
+        selects = [q for q in seen if q.lstrip().upper().startswith("SELECT")]
+        assert len(selects) == 1
+        store.close()
