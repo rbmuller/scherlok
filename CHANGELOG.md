@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Last anomaly in `scherlok status`** — a new column shows the most recent alert per table (`volume_drop · 2h ago`), and `--output json` gains `last_anomaly` (`type`, `severity`, `detected_at`, or `null`) with every existing key unchanged. Fetched in one window-function query for all tables. Thanks to [@bferanmi806-sketch](https://github.com/bferanmi806-sketch). ([#91](https://github.com/rbmuller/scherlok/issues/91), [#101](https://github.com/rbmuller/scherlok/pull/101))
+
 ## [1.0.4] — 2026-09-24
 
 ### Fixed
