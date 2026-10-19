@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-10-19
+
 ### Added
 - **`scherlok report --output json`** — one JSON array on stdout (`table`, `volume`, `schema`, `freshness`, `anomaly_count` per table), `[]` for an empty database, Rich output on stderr; text mode unchanged. `report` was the last read command without a machine-readable mode. Thanks to [@bferanmi806-sketch](https://github.com/bferanmi806-sketch). ([#93](https://github.com/rbmuller/scherlok/issues/93), [#103](https://github.com/rbmuller/scherlok/pull/103))
 - **Last anomaly in `scherlok status`** — a new column shows the most recent alert per table (`volume_drop · 2h ago`), and `--output json` gains `last_anomaly` (`type`, `severity`, `detected_at`, or `null`) with every existing key unchanged. Fetched in one window-function query for all tables. Thanks to [@bferanmi806-sketch](https://github.com/bferanmi806-sketch). ([#91](https://github.com/rbmuller/scherlok/issues/91), [#101](https://github.com/rbmuller/scherlok/pull/101))
