@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`scherlok watch --schedule "0 6 * * *"`** — keeps the process alive and runs the regular watch path (alerts, `--explain`) on every five-field cron tick in the host's local time; the Docker image defaults to UTC. Each run's exit code is logged without stopping the loop, `SIGINT`/`SIGTERM` let the current run finish before exiting, and missed ticks are skipped rather than replayed. `croniter` ships behind the optional `scherlok[schedule]` extra (bundled in the Docker image); a missing `croniter` or an invalid expression exits 1 with a one-line hint. Thanks to [@bferanmi806-sketch](https://github.com/bferanmi806-sketch). ([#90](https://github.com/rbmuller/scherlok/issues/90), [#105](https://github.com/rbmuller/scherlok/pull/105))
+
 ## [1.0.5] — 2026-10-19
 
 ### Added
