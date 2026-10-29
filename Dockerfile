@@ -22,7 +22,7 @@ COPY src ./src
 # rebuild for a different warehouse.
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install ".[bigquery,snowflake,dbt]"
+    && /opt/venv/bin/pip install ".[bigquery,snowflake,dbt,schedule]"
 
 # Stage 2: runtime
 # Slim Python base + the installed venv. No build toolchain, no source tree.

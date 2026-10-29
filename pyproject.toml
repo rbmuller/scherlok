@@ -49,6 +49,9 @@ dbt = [
 explain = [
     "anthropic>=0.40",
 ]
+schedule = [
+    "croniter>=2.0",
+]
 mcp = [
     "mcp>=1.2,<3",
 ]

@@ -127,8 +127,9 @@ scherlok watch --webhook https://outlook.office.com/webhook/...
 # Any endpoint (generic JSON payload)
 scherlok watch --webhook https://my-api.com/alerts
 
-# CI/CD gate (fails pipeline on CRITICAL)
-scherlok watch --exit-code --fail-on critical
+# Repeating watch on the container's local time (install optional extra first)
+pip install 'scherlok[schedule]'
+scherlok watch --schedule "0 6 * * *"
 ```
 
 Auto-detects Slack, Discord, and Teams from the URL and formats the payload accordingly. Any other URL receives a generic JSON payload.

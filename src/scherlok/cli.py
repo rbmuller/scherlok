@@ -412,6 +412,9 @@ def watch(
         help="Email recipient(s) for alerts. Repeat to send to multiple.",
     ),
     explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
+    schedule: str | None = typer.Option(
+        None, "--schedule", help="Repeat on a five-field cron schedule (local time).",
+    ),
 ) -> None:
     """Compare current state vs stored profile. Detect anomalies.
 
@@ -420,9 +423,38 @@ def watch(
         scherlok watch --webhook https://hooks.slack.com/...
         scherlok watch --email alice@company.com --email bob@company.com
         scherlok watch --webhook https://hooks.slack.com/... --explain
+        scherlok watch --schedule "0 6 * * *"
     """
-    anomalies = _run_watch(webhook=webhook, emails=email or None, explain=explain)
-    raise typer.Exit(code=exit_code_for(anomalies))
+    if schedule is None:
+        anomalies = _run_watch(webhook=webhook, emails=email or None, explain=explain)
+        raise typer.Exit(code=exit_code_for(anomalies))
+
+    from scherlok.schedule import ScheduleError, run_schedule
+
+    def run_once() -> int:
+        try:
+            anomalies = _run_watch(webhook=webhook, emails=email or None, explain=explain)
+            return exit_code_for(anomalies)
+        except typer.Exit as exc:
+            # A failed connection should be logged as a run failure, rather than
+            # silently stopping all subsequent scheduled checks.
+            return int(exc.exit_code)
+        except Exception as exc:
+            typer.echo(
+                f"Scheduled watch raised {type(exc).__name__}; continuing at the next tick.",
+                err=True,
+            )
+            return 1
+
+    try:
+        run_schedule(
+            schedule,
+            run_once,
+            lambda code: typer.echo(f"Scheduled watch completed (exit code {code})."),
+        )
+    except ScheduleError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def _run_ci(
