@@ -23,7 +23,7 @@ uvx --from "scherlok[duckdb]" scherlok demo
 | Volume spike | 3x more rows than normal | WARNING |
 | Freshness | Table hasn't updated in 12h (normally every 2h) | CRITICAL |
 | Schema drift | Column removed or type changed | CRITICAL |
-| NULL surge | NULL rate jumped from 2% to 45% | WARNING |
+| NULL surge | NULL rate jumped from 2% to 45% | CRITICAL |
 | Distribution shift | Column mean moved 3+ standard deviations | INFO, WARNING above 5σ |
 | Cardinality explosion | Status column went from 5 values to 500 | CRITICAL |
 

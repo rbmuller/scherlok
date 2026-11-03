@@ -60,7 +60,7 @@ Current tools (Great Expectations, Soda, dbt tests) require you to **define what
 | **Volume spike** | 3x more rows than normal | WARNING |
 | **Freshness alert** | Table hasn't updated in 12h (normally every 2h) | CRITICAL |
 | **Schema drift** | Column removed or type changed | CRITICAL |
-| **NULL surge** | NULL rate jumped from 2% to 45% | WARNING |
+| **NULL surge** | NULL rate jumped from 2% to 45% | CRITICAL |
 | **Distribution shift** | Column mean shifted 3+ standard deviations (Shewhart-style control limit) | INFO, WARNING above 5σ |
 | **Cardinality explosion** | Status column went from 5 values to 500 | CRITICAL |
 
