@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`scherlok watch --schedule "0 6 * * *"`** — keeps the process alive and runs the regular watch path (alerts, `--explain`) on every five-field cron tick in the host's local time; the Docker image defaults to UTC. Each run's exit code is logged without stopping the loop, `SIGINT`/`SIGTERM` let the current run finish before exiting, and missed ticks are skipped rather than replayed. `croniter` ships behind the optional `scherlok[schedule]` extra (bundled in the Docker image); a missing `croniter` or an invalid expression exits 1 with a one-line hint. Thanks to [@bferanmi806-sketch](https://github.com/bferanmi806-sketch). ([#90](https://github.com/rbmuller/scherlok/issues/90), [#105](https://github.com/rbmuller/scherlok/pull/105))
 
+### Fixed
+- **`config.json` is owner-only** — `scherlok connect`, `config`, `ci <url>` and `dbt` save the connection string, password included, to `~/.scherlok/config.json`, which was written with the process umask and so was usually readable by every user on a shared machine or CI runner. The file is now created as `0600` rather than tightened after the write, an existing file is tightened on the next save, and a newly created `~/.scherlok` (or the directory of a custom store path) is `0700`. An existing directory keeps its mode. POSIX only; Windows is unchanged. ([#117](https://github.com/rbmuller/scherlok/issues/117))
+
 ## [1.0.5] — 2026-10-19
 
 ### Added
