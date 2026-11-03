@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,9 @@ from typing import Any
 from scherlok.config import SCHERLOK_DIR, make_private_dir
 
 PROFILES_DB = SCHERLOK_DIR / "profiles.db"
+
+DISTRIBUTION_PROFILE_PREFIX = "distribution:"
+RAW_VALUE_KEYS = ("top_values", "min", "max")
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS profiles (
@@ -42,6 +46,33 @@ ON anomalies (table_name, detected_at DESC)
 """
 
 
+def _strip_raw_distribution_values(conn: sqlite3.Connection) -> None:
+    """Drop the column values older releases kept in distribution profiles (#114)."""
+    rows = conn.execute(
+        "SELECT id, data FROM profiles WHERE profile_type LIKE ?",
+        (f"{DISTRIBUTION_PROFILE_PREFIX}%",),
+    ).fetchall()
+    for row in rows:
+        profile = json.loads(row["data"])
+        if not any(key in profile for key in RAW_VALUE_KEYS):
+            continue
+        for key in RAW_VALUE_KEYS:
+            profile.pop(key, None)
+        conn.execute(
+            "UPDATE profiles SET data = ? WHERE id = ?",
+            (json.dumps(profile, default=str), row["id"]),
+        )
+
+
+# Ordered store migrations. PRAGMA user_version records how many a store has
+# applied, so add a migration by appending a function that takes the
+# connection; never reorder or remove one. Every migration must be idempotent:
+# it also runs on brand-new stores, and runs again if a later step fails.
+MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
+    _strip_raw_distribution_values,  # user_version 1
+)
+
+
 class ProfileStore:
     """SQLite-backed storage for data profiles."""
 
@@ -51,6 +82,7 @@ class ProfileStore:
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._init_db()
+        self._migrate()
 
     def _init_db(self) -> None:
         """Create tables and indexes if they don't exist."""
@@ -59,6 +91,26 @@ class ProfileStore:
         self._conn.execute(CREATE_ANOMALIES_SQL)
         self._conn.execute(CREATE_ANOMALIES_INDEX_SQL)
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Apply pending MIGRATIONS in one transaction, then VACUUM.
+
+        A store written by a newer Scherlok has a higher user_version than
+        this code knows about; it is left untouched, never downgraded.
+        """
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        pending = MIGRATIONS[version:]
+        if not pending:
+            return
+        with self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            for migration in pending:
+                migration(self._conn)
+        # VACUUM rewrites the file so replaced data does not linger in free
+        # pages. It cannot run inside a transaction, and the version is only
+        # bumped once it succeeds, so a failed VACUUM is retried on next open.
+        self._conn.execute("VACUUM")
+        self._conn.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
 
     def save_profile(self, table_name: str, profile_type: str, data: dict) -> None:
         """Save a profile snapshot to the store."""

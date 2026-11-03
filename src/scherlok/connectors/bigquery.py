@@ -151,34 +151,17 @@ class BigQueryConnector(BaseConnector):
             sql = (
                 f"SELECT "
                 f"  AVG(CAST(`{column}` AS FLOAT64)) AS mean, "
-                f"  STDDEV(CAST(`{column}` AS FLOAT64)) AS stddev, "
-                f"  CAST(MIN(`{column}`) AS STRING) AS min, "
-                f"  CAST(MAX(`{column}`) AS STRING) AS max "
+                f"  STDDEV(CAST(`{column}` AS FLOAT64)) AS stddev "
                 f"FROM {fqn}"
             )
             rows = self._query(sql)
             if rows:
                 stats["mean"] = rows[0]["mean"]
                 stats["stddev"] = rows[0]["stddev"]
-                stats["min"] = rows[0]["min"]
-                stats["max"] = rows[0]["max"]
             else:
-                stats["mean"] = stats["stddev"] = stats["min"] = stats["max"] = None
+                stats["mean"] = stats["stddev"] = None
         except Exception:
-            stats["mean"] = stats["stddev"] = stats["min"] = stats["max"] = None
-
-        # Top values
-        try:
-            sql = (
-                f"SELECT CAST(`{column}` AS STRING) AS val, COUNT(*) AS cnt "
-                f"FROM {fqn} "
-                f"WHERE `{column}` IS NOT NULL "
-                f"GROUP BY `{column}` ORDER BY cnt DESC LIMIT 5"
-            )
-            rows = self._query(sql)
-            stats["top_values"] = [{"value": r["val"], "count": r["cnt"]} for r in rows]
-        except Exception:
-            stats["top_values"] = []
+            stats["mean"] = stats["stddev"] = None
 
         return stats
 

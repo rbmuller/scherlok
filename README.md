@@ -96,7 +96,7 @@ $ scherlok investigate
   Done. Profiles saved.
 ```
 
-Scherlok profiles every table: row counts, column types, NULL rates, value distributions, freshness cadence, cardinality. Stores everything locally in SQLite.
+Scherlok profiles every table: row counts, column types, NULL rates, value distributions, freshness cadence, cardinality. Stores everything locally in SQLite, as aggregates only: no value from your rows is saved ([what Scherlok stores](https://rbmuller.github.io/scherlok/getting-started/#what-scherlok-stores)).
 
 ### 2. `watch` — Detect anomalies
 

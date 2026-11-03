@@ -75,6 +75,24 @@ The container defaults to UTC unless its local timezone has been configured.
 
 Remote stores (`s3://`, `gs://`, `az://`) let CI runners and teammates share one baseline; the file is synced down before a run and back up after it.
 
+## What Scherlok stores
+
+`profiles.db` holds aggregates and metadata only. No value read from a row of your tables is saved:
+
+| Record | Fields |
+|---|---|
+| Volume | row count, time of the run |
+| Schema | column names, types, nullability |
+| Freshness | the table's last-modified time as the warehouse reports it, hours since then |
+| Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
+| Anomaly history | table, anomaly type, severity, message, detection time |
+
+Anomaly messages quote the same aggregates and column names. Under `scherlok dbt` and `scherlok dbt-run-and-watch` they also name the downstream dbt models and exposures, with the exposure owners declared in your dbt project.
+
+An aggregate can still give a value away on a tiny table: the mean of a one-row column is that row's value.
+
+Older releases also saved each column's five most frequent values and its minimum and maximum (`top_values`, `min`, `max`). The first time an upgraded Scherlok opens a store, it deletes those fields and rewrites the file with SQLite's `VACUUM`, so they do not linger in free space; a remote store is cleaned on its next sync. Copies made before that still hold the values, including backups and older object versions in a versioned bucket: delete them yourself. A runner still on an older release that writes to the same store saves new values again, so upgrade every runner that shares it.
+
 ## Everyday commands
 
 ```

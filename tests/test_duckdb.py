@@ -4,6 +4,8 @@ import importlib.util
 
 import pytest
 
+from scherlok.store.sqlite import RAW_VALUE_KEYS
+
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("duckdb") is None,
     reason="duckdb not installed",
@@ -114,9 +116,25 @@ def test_get_column_stats_numeric(connector):
     assert stats["distinct_count"] == 2
     assert stats["mean"] == pytest.approx(5 / 3)
     assert stats["stddev"] is not None
-    assert stats["min"] == "1.0"
-    assert stats["max"] == "2.0"
-    assert stats["top_values"][0] == {"value": "2.0", "count": 2}
+    assert stats.keys().isdisjoint(RAW_VALUE_KEYS)
+
+
+def test_get_column_stats_returns_no_column_values(connector):
+    sentinel = "sentinel.person@example.invalid"
+    connector._conn.execute("CREATE TABLE people (email VARCHAR, score DOUBLE)")
+    connector._conn.execute(
+        f"INSERT INTO people VALUES ('{sentinel}', 424242.125), ('{sentinel}', 868686.375), "
+        "('other@example.invalid', 500000.0)"
+    )
+
+    email_stats = connector.get_column_stats("people", "email")
+    score_stats = connector.get_column_stats("people", "score")
+
+    assert email_stats == {"null_count": 0, "distinct_count": 2, "mean": None, "stddev": None}
+    assert score_stats["mean"] == pytest.approx(597642.8333, rel=1e-6)
+    assert score_stats.keys().isdisjoint(RAW_VALUE_KEYS)
+    for value in (sentinel, "424242.125", "868686.375"):
+        assert value not in repr(email_stats) + repr(score_stats)
 
 
 def test_get_last_modified_returns_none(connector):

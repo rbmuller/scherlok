@@ -165,14 +165,10 @@ def test_get_column_stats_numeric(connector):
     c, fake_conn = connector
 
     cur = MagicMock()
-    # fetchone called 3 times: null/distinct, numeric stats, (top_values uses fetchall)
+    # fetchone called twice: null/distinct, then numeric stats
     cur.fetchone.side_effect = [
         {"null_count": 2, "distinct_count": 50},
-        {"mean": 10.5, "stddev": 1.2, "min": "1", "max": "99"},
-    ]
-    cur.fetchall.return_value = [
-        {"val": "10", "cnt": 5},
-        {"val": "20", "cnt": 3},
+        {"mean": 10.5, "stddev": 1.2},
     ]
     ctx = MagicMock()
     ctx.__enter__ = MagicMock(return_value=cur)
@@ -181,11 +177,39 @@ def test_get_column_stats_numeric(connector):
 
     stats = c.get_column_stats("orders", "amount")
 
-    assert stats["null_count"] == 2
-    assert stats["distinct_count"] == 50
-    assert stats["mean"] == 10.5
-    assert stats["min"] == "1"
-    assert len(stats["top_values"]) == 2
+    assert stats == {"null_count": 2, "distinct_count": 50, "mean": 10.5, "stddev": 1.2}
+
+
+def test_get_column_stats_text_column_returns_no_values(connector):
+    """MySQL's AVG/STDDEV coerce text to DOUBLE (non-numeric strings count as 0),
+    so the stats query succeeds on a text column. Its MIN/MAX would have
+    returned real strings, so the connector must not ask for them at all."""
+    c, fake_conn = connector
+    sentinel = "sentinel.person@example.invalid"
+
+    cur = MagicMock()
+    # What the server would hand back if the connector still asked for values.
+    cur.fetchone.side_effect = [
+        {"null_count": 0, "distinct_count": 3},
+        {"mean": 0.0, "stddev": 0.0, "min": sentinel, "max": sentinel},
+    ]
+    cur.fetchall.return_value = [{"val": sentinel, "cnt": 3}]
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=cur)
+    ctx.__exit__ = MagicMock(return_value=False)
+    fake_conn.cursor.return_value = ctx
+
+    stats = c.get_column_stats("users", "email")
+
+    assert stats == {"null_count": 0, "distinct_count": 3, "mean": 0.0, "stddev": 0.0}
+    assert sentinel not in repr(stats)
+    cur.fetchall.assert_not_called()
+    executed = [call.args[0] for call in cur.execute.call_args_list]
+    assert len(executed) == 2
+    for sql in executed:
+        assert "MIN(" not in sql
+        assert "MAX(" not in sql
+        assert "GROUP BY" not in sql
 
 
 # ---------------------------------------------------------------------------

@@ -188,36 +188,17 @@ class SnowflakeConnector(BaseConnector):
             sql = (
                 f"SELECT "
                 f"  AVG(TRY_CAST({col} AS FLOAT)) AS mean, "
-                f"  STDDEV(TRY_CAST({col} AS FLOAT)) AS stddev, "
-                f"  CAST(MIN({col}) AS VARCHAR) AS min, "
-                f"  CAST(MAX({col}) AS VARCHAR) AS max "
+                f"  STDDEV(TRY_CAST({col} AS FLOAT)) AS stddev "
                 f"FROM {fqn}"
             )
             rows = self._query(sql)
             if rows:
                 stats["mean"] = rows[0]["mean"]
                 stats["stddev"] = rows[0]["stddev"]
-                stats["min"] = rows[0]["min"]
-                stats["max"] = rows[0]["max"]
             else:
-                stats["mean"] = stats["stddev"] = stats["min"] = stats["max"] = None
+                stats["mean"] = stats["stddev"] = None
         except Exception:
-            stats["mean"] = stats["stddev"] = stats["min"] = stats["max"] = None
-
-        # Top values
-        try:
-            sql = (
-                f"SELECT CAST({col} AS VARCHAR) AS val, COUNT(*) AS cnt "
-                f"FROM {fqn} "
-                f"WHERE {col} IS NOT NULL "
-                f"GROUP BY {col} ORDER BY cnt DESC LIMIT 5"
-            )
-            rows = self._query(sql)
-            stats["top_values"] = [
-                {"value": r["val"], "count": int(r["cnt"])} for r in rows
-            ]
-        except Exception:
-            stats["top_values"] = []
+            stats["mean"] = stats["stddev"] = None
 
         return stats
 

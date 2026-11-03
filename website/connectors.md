@@ -8,7 +8,7 @@
 | MySQL | `scherlok[mysql]` | `mysql://user:pass@host:3306/dbname` |
 | DuckDB | `scherlok[duckdb]` | `duckdb:///path/to/file.db` or `duckdb:///:memory:` |
 
-Every connector profiles through metadata and aggregate queries only (`information_schema`, `COUNT`, `AVG`, `STDDEV`, top values). Scherlok never copies rows out of your warehouse.
+Every connector profiles through metadata and aggregate queries only (`information_schema`, `COUNT`, `COUNT(DISTINCT)`, `AVG`, `STDDEV`). Scherlok never copies rows out of your warehouse, and the profile store keeps aggregates only: see [What Scherlok stores](getting-started.md#what-scherlok-stores).
 
 Want another warehouse? Databricks is tracked in [#37](https://github.com/rbmuller/scherlok/issues/37); the connector interface is five methods in `src/scherlok/connectors/base.py`.
 

@@ -63,10 +63,11 @@ BigQuery charges by bytes scanned. **An `investigate` run is not free** — know
 | `SELECT COUNT(*) AS cnt FROM <fqn>` | full table scan | **Yes — scans all rows** |
 | Schema metadata | `INFORMATION_SCHEMA.COLUMNS` | No (metadata) |
 | Last-modified | `__TABLES__` metadata | No |
-| Per column: `AVG`, `STDDEV`, `MIN`, `MAX` | scans that column | **Yes** |
-| Per column: top 5 values | scans that column with `GROUP BY` | **Yes** |
+| Per column: `COUNTIF(... IS NULL)`, `COUNT(DISTINCT ...)` | scans that column | **Yes** |
+| Per column: `AVG`, `STDDEV` | scans that column | **Yes** |
+| Per column: the `COUNT(*)` above again, for the NULL rate | same as the row count | **Yes** |
 
-For a dataset with **T** tables averaging **C** columns each: ~`T + 2·T·C` billed scans per `investigate` / `watch`. A 10-table dataset with 100-column-wide tables ≈ 2,010 queries. Most are tiny because they read a single column, but plan accordingly.
+For a dataset with **T** tables averaging **C** columns each: ~`T + 3·T·C` billed scans per `investigate` / `watch`. A 10-table dataset with 100-column-wide tables ≈ 3,010 queries. Most are tiny because they read a single column, but plan accordingly.
 
 **Recommendations for production:**
 

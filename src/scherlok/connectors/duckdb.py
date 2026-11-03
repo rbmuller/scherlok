@@ -120,31 +120,14 @@ class DuckDBConnector(BaseConnector):
             num_row = self._conn.execute(
                 f"SELECT "
                 f"  AVG({quoted_column}) AS mean, "
-                f"  STDDEV_SAMP({quoted_column}) AS stddev, "
-                f"  CAST(MIN({quoted_column}) AS VARCHAR) AS min, "
-                f"  CAST(MAX({quoted_column}) AS VARCHAR) AS max "
+                f"  STDDEV_SAMP({quoted_column}) AS stddev "
                 f"FROM {quoted_table}"
             ).fetchone()
             stats["mean"] = float(num_row[0]) if num_row[0] is not None else None
             stats["stddev"] = float(num_row[1]) if num_row[1] is not None else None
-            stats["min"] = num_row[2]
-            stats["max"] = num_row[3]
         except duckdb.Error:
             stats["mean"] = None
             stats["stddev"] = None
-            stats["min"] = None
-            stats["max"] = None
-
-        try:
-            rows = self._conn.execute(
-                f"SELECT CAST({quoted_column} AS VARCHAR) AS val, COUNT(*) AS cnt "
-                f"FROM {quoted_table} "
-                f"WHERE {quoted_column} IS NOT NULL "
-                f"GROUP BY {quoted_column} ORDER BY cnt DESC LIMIT 5"
-            ).fetchall()
-            stats["top_values"] = [{"value": row[0], "count": int(row[1])} for row in rows]
-        except duckdb.Error:
-            stats["top_values"] = []
 
         return stats
 

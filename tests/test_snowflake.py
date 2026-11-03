@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from scherlok.store.sqlite import RAW_VALUE_KEYS
+
 
 class TestSnowflakeConnector:
     def test_parse_valid_connection_string(self):
@@ -85,16 +87,30 @@ class TestSnowflakeConnector:
 
         mock_query.side_effect = [
             [{"null_count": 10, "distinct_count": 90}],
-            [{"mean": 42.5, "stddev": 8.3, "min": "1", "max": "100"}],
-            [{"val": "42", "cnt": 20}, {"val": "7", "cnt": 15}],
+            [{"mean": 42.5, "stddev": 8.3}],
         ]
         c = SnowflakeConnector("snowflake://acc/db/schema")
         c._conn = MagicMock()
         stats = c.get_column_stats("users", "score")
-        assert stats["null_count"] == 10
-        assert stats["distinct_count"] == 90
-        assert stats["mean"] == 42.5
-        assert len(stats["top_values"]) == 2
+        assert stats == {"null_count": 10, "distinct_count": 90, "mean": 42.5, "stddev": 8.3}
+
+    @patch("scherlok.connectors.snowflake.SnowflakeConnector._query")
+    def test_get_column_stats_queries_no_column_values(self, mock_query):
+        from scherlok.connectors.snowflake import SnowflakeConnector
+
+        mock_query.side_effect = [
+            [{"null_count": 0, "distinct_count": 3}],
+            [{"mean": None, "stddev": None}],
+        ]
+        c = SnowflakeConnector("snowflake://acc/db/schema")
+        c._conn = MagicMock()
+        stats = c.get_column_stats("users", "email")
+        assert stats.keys().isdisjoint(RAW_VALUE_KEYS)
+        assert mock_query.call_count == 2
+        for (sql,), _ in mock_query.call_args_list:
+            assert "MIN(" not in sql
+            assert "MAX(" not in sql
+            assert "GROUP BY" not in sql
 
     @patch("scherlok.connectors.snowflake.SnowflakeConnector._query")
     def test_get_last_modified(self, mock_query):

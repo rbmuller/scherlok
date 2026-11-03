@@ -6,9 +6,11 @@ from scherlok.connectors.base import BaseConnector
 def profile_distribution(connector: BaseConnector, table: str, column: str) -> dict:
     """Profile the distribution of a single column.
 
+    Only aggregates are copied from the connector's stats, so a value read
+    from a row never reaches the profile store, whatever the connector returns.
+
     Returns:
-        Dict with keys: mean, stddev, min, max, null_count, null_rate,
-        distinct_count, top_values.
+        Dict with keys: mean, stddev, null_count, null_rate, distinct_count.
     """
     stats = connector.get_column_stats(table, column)
     row_count = connector.get_row_count(table)
@@ -17,10 +19,7 @@ def profile_distribution(connector: BaseConnector, table: str, column: str) -> d
     return {
         "mean": stats.get("mean"),
         "stddev": stats.get("stddev"),
-        "min": stats.get("min"),
-        "max": stats.get("max"),
         "null_count": stats["null_count"],
         "null_rate": round(null_rate, 4),
         "distinct_count": stats["distinct_count"],
-        "top_values": stats.get("top_values", []),
     }
