@@ -2,7 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-from scherlok.alerter.exitcode import exit_code_for
+import pytest
+
+from scherlok.alerter.exitcode import exit_code_for, fails_gate, normalize_fail_on
 from scherlok.alerter.slack import send_slack_alert
 from scherlok.detector.severity import Severity
 
@@ -38,6 +40,49 @@ class TestExitCode:
             {"table": "users", "type": "x", "severity": Severity.INFO, "message": "ok"},
         ]
         assert exit_code_for(anomalies) == 0
+
+
+def _anomaly(severity):
+    return {"table": "t", "type": "x", "severity": severity, "message": "m"}
+
+
+class TestFailOn:
+    def test_critical_fails_only_on_critical(self):
+        assert fails_gate([_anomaly(Severity.CRITICAL)], "critical") is True
+        assert fails_gate([_anomaly(Severity.WARNING)], "critical") is False
+        assert fails_gate([_anomaly(Severity.INFO)], "critical") is False
+
+    def test_warning_fails_on_warning_or_worse(self):
+        assert fails_gate([_anomaly(Severity.WARNING)], "warning") is True
+        assert fails_gate([_anomaly(Severity.CRITICAL)], "warning") is True
+        assert fails_gate([_anomaly(Severity.INFO)], "warning") is False
+
+    def test_nothing_fails_an_empty_run(self):
+        assert fails_gate([], "warning") is False
+
+    def test_default_threshold_is_critical(self):
+        assert fails_gate([_anomaly(Severity.WARNING)]) is False
+        assert fails_gate([_anomaly(Severity.CRITICAL)]) is True
+
+    def test_stored_string_severities_count_too(self):
+        """Rows read back from the anomalies table carry plain strings."""
+        assert fails_gate([_anomaly("CRITICAL")], "critical") is True
+        assert fails_gate([_anomaly("WARNING")], "warning") is True
+
+    def test_threshold_is_case_insensitive(self):
+        assert normalize_fail_on("WARNING") == "warning"
+        assert fails_gate([_anomaly(Severity.WARNING)], "Warning") is True
+
+    def test_unknown_threshold_is_rejected_not_treated_as_critical(self):
+        with pytest.raises(ValueError, match="'critical' or 'warning'"):
+            normalize_fail_on("warnings")
+        with pytest.raises(ValueError):
+            fails_gate([_anomaly(Severity.WARNING)], "warnings")
+
+    def test_exit_code_for_matches_the_critical_gate(self):
+        for severity in Severity:
+            anomalies = [_anomaly(severity)]
+            assert exit_code_for(anomalies) == int(fails_gate(anomalies, "critical"))
 
 
 class TestSlackAlert:

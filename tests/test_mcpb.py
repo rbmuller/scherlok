@@ -64,6 +64,13 @@ def test_manifest_tools_match_the_registered_tools(manifest):
     assert all(tool["description"].strip() for tool in manifest["tools"])
 
 
+def test_manifest_advertises_the_read_only_verify_gate(manifest):
+    """The equality check above passes if both lists lose `verify` together; this doesn't."""
+    tools = {tool["name"]: tool["description"] for tool in manifest["tools"]}
+    assert "verify" in tools
+    assert "without saving" in tools["verify"]
+
+
 def test_entry_point_exists_and_starts_the_packaged_server(manifest):
     entry_point = BUNDLE_DIR / manifest["server"]["entry_point"]
     assert entry_point.is_file()

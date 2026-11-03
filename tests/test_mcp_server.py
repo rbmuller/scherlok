@@ -28,6 +28,8 @@ _HAS_MCP = importlib.util.find_spec("mcp") is not None
 
 pytestmark = pytest.mark.skipif(not _HAS_DUCKDB, reason="duckdb not installed")
 
+EXPECTED_TOOLS = {"list_tables", "investigate", "watch", "status", "history", "check", "verify"}
+
 
 @pytest.fixture()
 def duck_connector():
@@ -172,6 +174,100 @@ def test_check_invalid_fail_on_raises(wired):
         wired.check(fail_on="banana")
 
 
+def test_check_fail_on_warning_fails_on_a_warning(wired, duck_connector):
+    wired.investigate()
+    duck_connector._conn.execute("DELETE FROM orders WHERE id = 3")  # 3 -> 2 rows: WARNING
+
+    # check() saves what it sees, so a second check would compare against the
+    # broken state; the read-only verify() shows the lenient verdict instead.
+    lenient = wired.verify(fail_on="critical")
+    strict = wired.check(fail_on="WARNING")
+
+    assert lenient["passed"] is True
+    assert lenient["warning"] >= 1
+    assert strict["passed"] is False
+    assert strict["fail_on"] == "warning"
+    assert strict["critical"] == 0
+
+
+# ----- verify ---------------------------------------------------------------
+
+def _store_row_counts(tmp_path) -> dict[str, int]:
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / "profiles.db")
+    try:
+        return {
+            name: conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+            for name in ("profiles", "anomalies")
+        }
+    finally:
+        conn.close()
+
+
+def test_verify_fails_the_same_way_on_every_retry_and_saves_nothing(
+    wired, duck_connector, tmp_path
+):
+    wired.investigate(tables=["orders"])
+    duck_connector._conn.execute("DELETE FROM orders WHERE id > 1")  # 3 -> 1 row
+    before = _store_row_counts(tmp_path)
+
+    runs = [wired.verify(tables=["orders"]) for _ in range(3)]
+
+    assert runs[0]["passed"] is False
+    assert runs[0]["critical"] >= 1
+    assert runs[0]["anomalies"][0]["severity"] == "CRITICAL"
+    assert runs[1] == runs[0] and runs[2] == runs[0]
+    assert _store_row_counts(tmp_path) == before
+
+
+def test_verify_lists_tables_without_baseline_apart(wired):
+    wired.investigate(tables=["orders"])
+
+    out = wired.verify()
+
+    assert out["passed"] is True
+    assert out["tables_verified"] == ["orders"]
+    assert out["tables_without_baseline"] == ["users"]
+    assert out["truncated"] is False
+
+
+def test_verify_payload_shape(wired):
+    wired.investigate()
+
+    out = wired.verify(fail_on="warning")
+
+    assert set(out) == {
+        "passed", "fail_on", "tables_verified", "tables_without_baseline",
+        "anomaly_count", "critical", "warning", "info", "anomalies", "truncated",
+    }
+    assert out["fail_on"] == "warning"
+
+
+def test_verify_caps_anomalies(wired, duck_connector, monkeypatch):
+    wired.investigate()
+    duck_connector._conn.execute("DELETE FROM orders WHERE id > 1")
+    duck_connector._conn.execute("DELETE FROM users WHERE id > 1")
+    monkeypatch.setitem(wired._VERIFY_CAPS, "anomalies", 1)
+
+    out = wired.verify()
+
+    assert out["anomaly_count"] >= 2
+    assert len(out["anomalies"]) == 1
+    assert out["truncated"] is True
+
+
+def test_verify_unknown_table_raises(wired):
+    with pytest.raises(ValueError, match="not found"):
+        wired.verify(tables=["ghost"])
+
+
+def test_verify_invalid_fail_on_raises_before_connecting(wired, monkeypatch):
+    monkeypatch.setattr(wired, "_connect", lambda: pytest.fail("must not connect"))
+    with pytest.raises(ValueError, match="fail_on"):
+        wired.verify(fail_on="banana")
+
+
 # ----- protocol smoke test --------------------------------------------------
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp not installed")
@@ -181,7 +277,7 @@ def test_build_server_registers_all_tools():
     server = build_server()
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
-    assert names == {"list_tables", "investigate", "watch", "status", "history", "check"}
+    assert names == EXPECTED_TOOLS
 
 
 # --- stdio transport -------------------------------------------------------
@@ -208,7 +304,6 @@ HANDSHAKE = [
     {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
 ]
 
-EXPECTED_TOOLS = {"list_tables", "investigate", "watch", "status", "history", "check"}
 
 HANDSHAKE_TIMEOUT_SECONDS = 60
 

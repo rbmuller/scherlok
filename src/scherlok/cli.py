@@ -20,7 +20,13 @@ from rich.table import Table
 from scherlok import __version__
 from scherlok.alerter.console import print_anomalies, print_explanation, print_profile_summary
 from scherlok.alerter.email import send_email_alert
-from scherlok.alerter.exitcode import exit_code_for
+from scherlok.alerter.exitcode import (
+    FAIL_ON_CHOICES,
+    FAIL_ON_CRITICAL,
+    exit_code_for,
+    fails_gate,
+    normalize_fail_on,
+)
 from scherlok.alerter.webhook import send_webhook
 from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
@@ -40,7 +46,13 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
-from scherlok.service import profile_and_detect
+from scherlok.service import (
+    UnknownTablesError,
+    VerificationResult,
+    profile_and_detect,
+    severity_counts,
+    verify_tables,
+)
 from scherlok.store.remote import sync_context
 from scherlok.store.sqlite import ProfileStore
 
@@ -84,11 +96,17 @@ def _root_callback(
 
 
 def _get_connector_or_exit() -> object:
-    """Load config and return a connected connector, or exit with error."""
+    """Load config and return a connected connector, or exit with error.
+
+    Reads the connection from SCHERLOK_CONNECTION or the saved config and
+    never writes it back.
+    """
     cfg = ScherlokConfig.load()
     conn_str = cfg.get_connection_string()
     if not conn_str:
-        console.print(
+        # out_error, not console.print: under --output json this must reach
+        # stderr, never the stdout reserved for the payload.
+        out_error(
             "[red]No connection configured.[/red] "
             "Run [bold]scherlok connect <connection_string>[/bold] first."
         )
@@ -98,6 +116,16 @@ def _get_connector_or_exit() -> object:
         _print_connect_failure(connector)
         raise typer.Exit(code=1)
     return connector
+
+
+def _fail_on_or_exit(fail_on: str) -> str:
+    """Normalize --fail-on, or exit 1 before any work: a typo must not loosen a gate."""
+    try:
+        return normalize_fail_on(fail_on)
+    except ValueError as exc:
+        choices = " or ".join(f"'{choice}'" for choice in FAIL_ON_CHOICES)
+        out_error(f"[red]Invalid --fail-on value '{rich_escape(fail_on)}'. Use {choices}.[/red]")
+        raise typer.Exit(code=1) from exc
 
 
 def _print_connect_failure(connector: object) -> None:
@@ -464,6 +492,8 @@ def _run_ci(
     fail_on: str,
     explain: bool = False,
 ) -> None:
+    fail_on = _fail_on_or_exit(fail_on)
+
     # Save connection
     cfg = ScherlokConfig.load()
     cfg.connection_string = connection_string
@@ -480,15 +510,8 @@ def _run_ci(
         webhook=webhook, emails=email or None, explain=explain, fail_on=fail_on
     )
 
-    # Custom exit code based on --fail-on
-    fail_on_lower = fail_on.lower()
-    if fail_on_lower == "warning":
-        from scherlok.detector.severity import Severity
-        if any(a["severity"] in (Severity.WARNING, Severity.CRITICAL) for a in anomalies):
-            raise typer.Exit(code=1)
-    else:  # critical (default)
-        if exit_code_for(anomalies) == 1:
-            raise typer.Exit(code=1)
+    if fails_gate(anomalies, fail_on):
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -542,6 +565,117 @@ def check(
 ) -> None:
     """Assertion-only CI alias for `scherlok ci --fail-on critical`."""
     _run_ci(connection_string, webhook, email, fail_on, explain)
+
+
+VERIFY_PREVIEW_TABLES = 5
+
+
+def _run_verify(tables: list[str] | None, fail_on: str) -> VerificationResult:
+    """Verify tables against the stored baseline without writing anything.
+
+    No profiles, anomalies or config are saved, and a remote store is
+    downloaded but never uploaded back.
+    """
+    connector = _get_connector_or_exit()
+    cfg = ScherlokConfig.load()
+
+    from scherlok.config import PROFILES_DB
+    with sync_context(cfg.get_store(), PROFILES_DB, upload_on_exit=False):
+        store = ProfileStore()
+        try:
+            return verify_tables(connector, store, tables, fail_on)
+        except UnknownTablesError as exc:
+            out_error(f"[red]{rich_escape(str(exc))}[/red]")
+            raise typer.Exit(code=1) from exc
+        finally:
+            store.close()
+
+
+def _print_verification(result: VerificationResult) -> None:
+    """Render a verification for people: anomalies, unverified tables, verdict.
+
+    A failed verdict goes through out_error so it still shows under --quiet.
+    """
+    if result.anomalies and not is_quiet():
+        print_anomalies(result.anomalies)
+    missing = result.tables_without_baseline
+    if missing:
+        preview = ", ".join(rich_escape(t) for t in missing[:VERIFY_PREVIEW_TABLES])
+        overflow = " …" if len(missing) > VERIFY_PREVIEW_TABLES else ""
+        out_info(
+            f"[yellow]Not verified, no baseline yet ({len(missing)}): {preview}{overflow}. "
+            "Run [bold]scherlok investigate[/bold] to set one.[/yellow]"
+        )
+    counts = severity_counts(result.anomalies)
+    severities = ", ".join(f"{count} {name}" for name, count in reversed(counts.items()))
+    summary = (
+        f"{len(result.tables_verified)} verified, {len(missing)} without baseline, "
+        f"{severities} (--fail-on {result.fail_on}). Nothing was saved."
+    )
+    if result.passed:
+        out_info(f"[green]Verify passed:[/green] {summary}")
+    else:
+        out_error(f"[red]Verify failed:[/red] {summary}")
+
+
+@app.command()
+def verify(
+    table: list[str] = typer.Option(
+        None, "--table",
+        help="Only verify this table. Repeat to verify several; omit for every table.",
+    ),
+    fail_on: str = typer.Option(
+        FAIL_ON_CRITICAL, "--fail-on",
+        help="Severity that fails the gate with exit code 1: 'critical' (default) or 'warning'",
+    ),
+    output: str = typer.Option(
+        OUTPUT_TEXT, "--output",
+        help="Output format: 'text' (default) or 'json' (one object on stdout)",
+    ),
+) -> None:
+    """Compare tables with the stored baseline without saving anything.
+
+    A read-only gate: unlike `watch` and `ci`, it writes no profiles, no
+    anomalies and no config, and never uploads a remote store, so retrying
+    a failed check keeps failing until the data is fixed. Tables without a
+    baseline are listed and never count as verified. The connection comes
+    from SCHERLOK_CONNECTION or `scherlok connect`.
+
+    Example:
+        scherlok verify
+        scherlok verify --table orders --table customers --fail-on warning
+        scherlok verify --output json
+    """
+    output_lower = output.lower()
+    if output_lower not in OUTPUT_FORMATS:
+        out_error(f"[red]Invalid --output value '{output}'. Use 'text' or 'json'.[/red]")
+        raise typer.Exit(code=1)
+    json_mode = output_lower == OUTPUT_JSON
+    fail_on = _fail_on_or_exit(fail_on)
+
+    from scherlok.output import set_stderr, set_verbosity
+
+    prev_quiet = is_quiet()
+    if json_mode:
+        # Same contract as `report --output json`: stdout carries only the
+        # payload, and every Rich line goes to stderr.
+        set_stderr(True)
+        set_verbosity(quiet=True)
+
+    try:
+        result = _run_verify(table or None, fail_on)
+        if json_mode:
+            print(json.dumps(result.to_dict()))
+        # Under the forced quiet of JSON mode only a failed verdict gets
+        # through, on stderr, so a CI log still says why the step failed.
+        _print_verification(result)
+    finally:
+        if json_mode:
+            set_stderr(False)
+            set_verbosity(quiet=prev_quiet)
+
+    if not result.passed:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -612,6 +746,7 @@ def dbt(
         )
         raise typer.Exit(code=1)
     json_mode = output_lower == "json"
+    fail_on = _fail_on_or_exit(fail_on)
 
     from scherlok.output import is_quiet, set_stderr, set_verbosity
     prev_quiet = is_quiet()
@@ -855,16 +990,8 @@ def _dbt_impl(
             f"([red]{crit} critical[/red], [yellow]{warn} warning[/yellow])"
         )
 
-    fail_on_lower = fail_on.lower()
-    if fail_on_lower == "warning":
-        from scherlok.detector.severity import Severity
-        if any(
-            a["severity"] in (Severity.WARNING, Severity.CRITICAL) for a in all_anomalies
-        ):
-            raise typer.Exit(code=1)
-    else:
-        if exit_code_for(all_anomalies) == 1:
-            raise typer.Exit(code=1)
+    if fails_gate(all_anomalies, fail_on):
+        raise typer.Exit(code=1)
 
 
 @app.command(name="dbt-run-and-watch")
@@ -949,6 +1076,7 @@ def dbt_run_and_watch(
         )
         raise typer.Exit(code=1)
     json_mode = output_lower == "json"
+    fail_on = _fail_on_or_exit(fail_on)
 
     from scherlok.output import is_quiet, set_stderr, set_verbosity
     prev_quiet = is_quiet()

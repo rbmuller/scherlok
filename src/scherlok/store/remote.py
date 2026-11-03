@@ -142,8 +142,14 @@ def upload(local_path: Path, remote_url: str) -> None:
         raise RuntimeError(f"Upload to {remote_url} timed out after 60s")
 
 
-def sync_context(remote_url: str | None, local_path: Path):
+def sync_context(remote_url: str | None, local_path: Path, *, upload_on_exit: bool = True):
     """Context manager that downloads before and uploads after.
+
+    With ``upload_on_exit=False`` the store is downloaded but never uploaded.
+    Read-only commands such as ``scherlok verify`` need this: the upload
+    replaces the whole remote file without a lock, so a job that only reads
+    would still put back the copy it downloaded, overwriting whatever another
+    job saved in the meantime.
 
     Usage:
         with sync_context(remote_url, local_path):
@@ -160,7 +166,7 @@ def sync_context(remote_url: str | None, local_path: Path):
         try:
             yield local_path
         finally:
-            if remote_url:
+            if remote_url and upload_on_exit:
                 upload(local_path, remote_url)
 
     return _ctx()
