@@ -56,3 +56,26 @@ def test_connect_failure(mock_connect):
     mock_connect.side_effect = psycopg2.OperationalError("nope")
     c = PostgresConnector("postgresql://u:p@h/d")
     assert c.connect() is False
+
+
+def test_get_column_stats_queries_no_column_values():
+    """Stats are aggregates only: no top-values query, no min/max."""
+    from scherlok.store.sqlite import RAW_VALUE_KEYS
+
+    c, cur = _make_connector_with_mock_cursor([])
+    cur.fetchone.side_effect = [
+        {"null_count": 1, "distinct_count": 3},
+        {"mean": 42.5, "stddev": 8.3},
+    ]
+
+    stats = c.get_column_stats("users", "score")
+
+    assert stats == {"null_count": 1, "distinct_count": 3, "mean": 42.5, "stddev": 8.3}
+    assert stats.keys().isdisjoint(RAW_VALUE_KEYS)
+    cur.fetchall.assert_not_called()
+    executed = [call.args[0].upper() for call in cur.execute.call_args_list]
+    assert len(executed) == 2
+    for sql in executed:
+        assert "MIN(" not in sql
+        assert "MAX(" not in sql
+        assert "GROUP BY" not in sql

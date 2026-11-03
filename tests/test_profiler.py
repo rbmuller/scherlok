@@ -7,6 +7,7 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
+from scherlok.store.sqlite import RAW_VALUE_KEYS
 
 
 def _mock_connector() -> MagicMock:
@@ -21,11 +22,8 @@ def _mock_connector() -> MagicMock:
     connector.get_column_stats.return_value = {
         "mean": 50.5,
         "stddev": 10.2,
-        "min": "1",
-        "max": "100",
         "null_count": 5,
         "distinct_count": 95,
-        "top_values": [{"value": "42", "count": 20}],
     }
     connector.get_last_modified.return_value = datetime(
         2026, 3, 31, 12, 0, 0, tzinfo=timezone.utc
@@ -59,7 +57,29 @@ def test_profile_distribution_returns_stats():
     assert result["null_count"] == 5
     assert result["null_rate"] == 0.005
     assert result["distinct_count"] == 95
-    assert len(result["top_values"]) == 1
+    assert result.keys().isdisjoint(RAW_VALUE_KEYS)
+
+
+def test_profile_distribution_drops_column_values_from_connector():
+    """A connector that still returns row values cannot get them into a profile."""
+    connector = _mock_connector()
+    connector.get_column_stats.return_value = {
+        "mean": 50.5,
+        "stddev": 10.2,
+        "min": "sentinel-min",
+        "max": "sentinel-max",
+        "null_count": 5,
+        "distinct_count": 95,
+        "top_values": [{"value": "sentinel-top", "count": 20}],
+    }
+    result = profile_distribution(connector, "users", "score")
+    assert result == {
+        "mean": 50.5,
+        "stddev": 10.2,
+        "null_count": 5,
+        "null_rate": 0.005,
+        "distinct_count": 95,
+    }
 
 
 def test_profile_distribution_zero_rows():
@@ -69,11 +89,8 @@ def test_profile_distribution_zero_rows():
     connector.get_column_stats.return_value = {
         "mean": None,
         "stddev": None,
-        "min": None,
-        "max": None,
         "null_count": 0,
         "distinct_count": 0,
-        "top_values": [],
     }
     result = profile_distribution(connector, "empty_table", "col")
     assert result["null_rate"] == 0.0

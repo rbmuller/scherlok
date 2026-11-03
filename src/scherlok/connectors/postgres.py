@@ -111,40 +111,20 @@ class PostgresConnector(BaseConnector):
             stats["null_count"] = row["null_count"]
             stats["distinct_count"] = row["distinct_count"]
 
-            # Numeric stats (mean, stddev, min, max)
+            # Numeric stats (mean, stddev)
             try:
                 cur.execute(
                     f"SELECT "  # noqa: S608
                     f"  avg(\"{column}\")::float AS mean, "
-                    f"  stddev(\"{column}\")::float AS stddev, "
-                    f"  min(\"{column}\")::text AS min, "
-                    f"  max(\"{column}\")::text AS max "
+                    f"  stddev(\"{column}\")::float AS stddev "
                     f"FROM \"{table}\""
                 )
                 num_row = cur.fetchone()
                 stats["mean"] = num_row["mean"]
                 stats["stddev"] = num_row["stddev"]
-                stats["min"] = num_row["min"]
-                stats["max"] = num_row["max"]
             except psycopg2.Error:
                 stats["mean"] = None
                 stats["stddev"] = None
-                stats["min"] = None
-                stats["max"] = None
-
-            # Top values
-            try:
-                cur.execute(
-                    f"SELECT \"{column}\"::text AS val, count(*) AS cnt "  # noqa: S608
-                    f"FROM \"{table}\" "
-                    f"WHERE \"{column}\" IS NOT NULL "
-                    f"GROUP BY \"{column}\" ORDER BY cnt DESC LIMIT 5"
-                )
-                stats["top_values"] = [
-                    {"value": r["val"], "count": r["cnt"]} for r in cur.fetchall()
-                ]
-            except psycopg2.Error:
-                stats["top_values"] = []
 
         return stats
 

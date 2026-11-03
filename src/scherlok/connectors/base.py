@@ -42,7 +42,11 @@ class BaseConnector(ABC):
 
     @abstractmethod
     def get_column_stats(self, table: str, column: str) -> dict:
-        """Return column statistics: mean, stddev, min, max, null_count, etc."""
+        """Return column statistics: null_count, distinct_count, mean, stddev.
+
+        Aggregates only. Never return a value read from a row (top values,
+        min, max): the profile store would keep a plain-text copy of it.
+        """
         ...
 
     @abstractmethod
