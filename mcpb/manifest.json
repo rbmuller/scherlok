@@ -4,7 +4,7 @@
   "display_name": "Scherlok — data quality monitoring",
   "version": "1.0.5",
   "description": "Profile your database, learn what normal looks like, and let Claude tell you when something changed.",
-  "long_description": "Scherlok gives Claude read-only tools to monitor data quality in your warehouse.\n\nAsk it to profile your tables once, and it stores a baseline: row counts, column types, NULL rates, value distributions, freshness cadence and cardinality. From then on it can compare the current state against that baseline and report what drifted — volume drops and spikes, schema changes, stale tables, NULL surges, distribution shifts, cardinality explosions — each scored INFO, WARNING or CRITICAL. There are no rules or thresholds to write.\n\nThe connection string is resolved by the server from your settings and is never passed by the model. Every operation is read-only (SELECT and information_schema), there is no arbitrary-SQL tool, and results are capped so a single call cannot exhaust the conversation.\n\nWorks with PostgreSQL, MySQL and DuckDB. The command-line version adds BigQuery and Snowflake.",
+  "long_description": "Scherlok gives Claude read-only tools to monitor data quality in your warehouse.\n\nAsk it to profile your tables once, and it stores a baseline: row counts, column types, NULL rates, value distributions, freshness cadence and cardinality. From then on it can compare the current state against that baseline and report what drifted — volume drops and spikes, schema changes, stale tables, NULL surges, distribution shifts, cardinality explosions — each scored INFO, WARNING or CRITICAL. There are no rules or thresholds to write. To gate a change, verify compares against the baseline without saving anything, so a retry after a failure keeps failing until the data is fixed.\n\nThe connection string is resolved by the server from your settings and is never passed by the model. Every operation is read-only (SELECT and information_schema), there is no arbitrary-SQL tool, and results are capped so a single call cannot exhaust the conversation.\n\nWorks with PostgreSQL, MySQL and DuckDB. The command-line version adds BigQuery and Snowflake.",
   "author": {
     "name": "Robson Bayer Müller",
     "url": "https://github.com/rbmuller"
@@ -66,6 +66,10 @@
     {
       "name": "check",
       "description": "Run a watch over all tables and return a CI-style pass/fail gate"
+    },
+    {
+      "name": "verify",
+      "description": "Compare tables with the stored baseline and return a pass/fail gate without saving anything"
     }
   ],
   "compatibility": {

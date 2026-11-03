@@ -89,9 +89,13 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 | `status` | — | connection (redacted), tables visible, anomalies in last 30 days |
 | `history` | `days?` | anomalies recorded in the last N days |
 | `check` | `fail_on?` | CI-style pass/fail gate (`critical` default, or `warning`) |
+| `verify` | `tables?`, `fail_on?` | read-only pass/fail gate: compares with the baseline, saves nothing; lists `tables_without_baseline` |
 
 Typical agent flow: `investigate` once to set the baseline, then `watch` (or
-`check`) on later runs to catch drift.
+`check`) on later runs to catch drift. `watch` and `check` save every run, so
+after a failure a second call compares against the broken state and passes.
+To gate a change you just made, call `verify`: it writes nothing, so it keeps
+failing until the data is fixed.
 
 ## Security model
 

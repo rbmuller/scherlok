@@ -19,10 +19,21 @@ import inspect
 from typing import Any
 
 from scherlok import __version__
+from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fail_on
 from scherlok.config import ENV_CONNECTION, ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.connectors.base import BaseConnector
-from scherlok.service import anomaly_to_dict, profile_and_detect, redact_connection
+from scherlok.service import (
+    ANOMALIES_KEY,
+    TABLES_VERIFIED_KEY,
+    TABLES_WITHOUT_BASELINE_KEY,
+    anomaly_to_dict,
+    profile_and_detect,
+    redact_connection,
+    select_tables,
+    severity_counts,
+    verify_tables,
+)
 from scherlok.store.sqlite import ProfileStore
 
 SERVER_NAME = "scherlok"
@@ -34,6 +45,11 @@ SUPPORTED_MCP_SPEC = "mcp>=1.2,<3"
 # Output caps — keep any single tool result within a sane token budget.
 MAX_TABLES = 1000
 MAX_ANOMALIES = 200
+_VERIFY_CAPS = {
+    ANOMALIES_KEY: MAX_ANOMALIES,
+    TABLES_VERIFIED_KEY: MAX_TABLES,
+    TABLES_WITHOUT_BASELINE_KEY: MAX_TABLES,
+}
 
 
 class ConnectionNotConfiguredError(RuntimeError):
@@ -61,19 +77,25 @@ def _connect() -> BaseConnector:
     return connector
 
 
-def _select(tables: list[str] | None, visible: list[str]) -> list[str]:
-    """Resolve the requested table subset against what the connection can see.
+def _watch_tables(tables: list[str] | None) -> tuple[int, list[dict]]:
+    """Profile, detect and save profiles and anomalies for `tables` (None = all).
 
-    Unknown names raise rather than silently profiling nothing, so the agent
-    gets told it asked for a table that isn't there.
+    Returns ``(tables_watched, anomalies)`` with the raw anomaly dicts, so
+    `check` can decide the gate on every anomaly, not on the capped output.
     """
-    if not tables:
-        return visible
-    visible_set = set(visible)
-    missing = [t for t in tables if t not in visible_set]
-    if missing:
-        raise ValueError(f"Tables not found on this connection: {missing}")
-    return tables
+    connector = _connect()
+    targets = select_tables(tables, connector.list_tables())
+    store = ProfileStore()
+    try:
+        all_anomalies: list[dict] = []
+        for table in targets:
+            anomalies, _vol = profile_and_detect(connector, store, table)
+            all_anomalies.extend(anomalies)
+        if all_anomalies:
+            store.save_anomalies(all_anomalies)
+        return len(targets), all_anomalies
+    finally:
+        store.close()
 
 
 # --------------------------------------------------------------------------
@@ -104,7 +126,7 @@ def investigate(tables: list[str] | None = None) -> dict[str, Any]:
     anomalies are reported here. Run `watch` later to detect drift.
     """
     connector = _connect()
-    targets = _select(tables, connector.list_tables())
+    targets = select_tables(tables, connector.list_tables())
     store = ProfileStore()
     try:
         profiled = []
@@ -123,28 +145,14 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     Pass `tables` to limit scope, or omit to watch everything. Tables with no
     prior baseline are profiled silently (their baseline is set for next time).
     """
-    connector = _connect()
-    targets = _select(tables, connector.list_tables())
-    store = ProfileStore()
-    try:
-        all_anomalies: list[dict] = []
-        for table in targets:
-            anomalies, _vol = profile_and_detect(connector, store, table)
-            all_anomalies.extend(anomalies)
-        if all_anomalies:
-            store.save_anomalies(all_anomalies)
-        critical = sum(1 for a in all_anomalies if "CRITICAL" in str(a.get("severity")))
-        warning = sum(1 for a in all_anomalies if "WARNING" in str(a.get("severity")))
-        return {
-            "tables_watched": len(targets),
-            "anomaly_count": len(all_anomalies),
-            "critical": critical,
-            "warning": warning,
-            "anomalies": [anomaly_to_dict(a) for a in all_anomalies[:MAX_ANOMALIES]],
-            "truncated": len(all_anomalies) > MAX_ANOMALIES,
-        }
-    finally:
-        store.close()
+    tables_watched, anomalies = _watch_tables(tables)
+    return {
+        "tables_watched": tables_watched,
+        "anomaly_count": len(anomalies),
+        **severity_counts(anomalies),
+        ANOMALIES_KEY: [anomaly_to_dict(a) for a in anomalies[:MAX_ANOMALIES]],
+        "truncated": len(anomalies) > MAX_ANOMALIES,
+    }
 
 
 def status() -> dict[str, Any]:
@@ -185,30 +193,46 @@ def history(days: int = 30) -> dict[str, Any]:
         store.close()
 
 
-def check(fail_on: str = "critical") -> dict[str, Any]:
+def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
     """Run a watch over all tables and return a CI-style pass/fail gate.
 
     `fail_on` is `"critical"` (default — fail only on CRITICAL) or `"warning"`
     (stricter — fail on WARNING or worse). Mirrors `scherlok ci`. Returns
     `passed` plus the severity counts the decision was based on.
     """
-    threshold = fail_on.lower()
-    if threshold not in ("critical", "warning"):
-        raise ValueError("fail_on must be 'critical' or 'warning'")
-    result = watch(tables=None)
-    if threshold == "warning":
-        passed = result["critical"] == 0 and result["warning"] == 0
-    else:
-        passed = result["critical"] == 0
+    threshold = normalize_fail_on(fail_on)
+    _tables_watched, anomalies = _watch_tables(tables=None)
     return {
-        "passed": passed,
+        "passed": not fails_gate(anomalies, threshold),
         "fail_on": threshold,
-        "critical": result["critical"],
-        "warning": result["warning"],
+        **severity_counts(anomalies),
     }
 
 
-_TOOLS = [list_tables, investigate, watch, status, history, check]
+def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
+    """Compare tables with the stored baseline and return a pass/fail gate, saving nothing.
+
+    Read-only, unlike `watch` and `check`: no profiles or anomalies are
+    written, so retrying after a failure keeps failing until the data is
+    fixed. Pass `tables` to limit scope, or omit to verify everything.
+    `fail_on` is `"critical"` (default) or `"warning"`. Tables with no stored
+    baseline are listed in `tables_without_baseline`, never counted as
+    verified, and don't fail the gate on their own; `investigate` sets one.
+    """
+    threshold = normalize_fail_on(fail_on)
+    connector = _connect()
+    store = ProfileStore()
+    try:
+        result = verify_tables(connector, store, tables, threshold)
+    finally:
+        store.close()
+    payload = result.to_dict()
+    payload["truncated"] = any(len(payload[key]) > cap for key, cap in _VERIFY_CAPS.items())
+    payload.update({key: payload[key][:cap] for key, cap in _VERIFY_CAPS.items()})
+    return payload
+
+
+_TOOLS = [list_tables, investigate, watch, status, history, check, verify]
 
 
 def _installed_mcp_version() -> str | None:
