@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from scherlok.config import SCHERLOK_DIR
+from scherlok.config import SCHERLOK_DIR, make_private_dir
 
 PROFILES_DB = SCHERLOK_DIR / "profiles.db"
 
@@ -47,7 +47,7 @@ class ProfileStore:
 
     def __init__(self, db_path: Path | None = None) -> None:
         self._db_path = db_path or PROFILES_DB
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        make_private_dir(self._db_path.parent)
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._init_db()
