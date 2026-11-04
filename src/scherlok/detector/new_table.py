@@ -9,12 +9,19 @@ baseline.
 
 from collections.abc import Iterable
 
+from scherlok.detector.anomaly_types import (
+    ALL_NULL_COLUMN,
+    CONSTANT_COLUMN,
+    DUPLICATE_KEY,
+    EMPTY_TABLE,
+)
+from scherlok.detector.fields import (
+    METRIC_DISTINCT_COUNT,
+    METRIC_NULL_COUNT,
+    METRIC_ROW_COUNT,
+    make_anomaly,
+)
 from scherlok.detector.severity import Severity
-
-EMPTY_TABLE = "empty_table"
-ALL_NULL_COLUMN = "all_null_column"
-DUPLICATE_KEY = "duplicate_key"
-CONSTANT_COLUMN = "constant_column"
 
 NEW_TABLE_ANOMALY_TYPES = frozenset({EMPTY_TABLE, ALL_NULL_COLUMN, DUPLICATE_KEY, CONSTANT_COLUMN})
 
@@ -35,13 +42,21 @@ def detect_new_table_anomalies(
 
     ``volume``, ``schema`` and ``distributions`` (column name -> distribution
     profile) are the profiles this run already collected. Returns anomaly
-    dicts with keys: table, type, message, severity.
+    dicts (see ``scherlok.detector.fields``) with ``current`` set and no
+    ``baseline``, since the table has none yet.
     """
     row_count = volume.get("row_count")
     if row_count is None:
         return []
     if row_count == 0:
-        return [_anomaly(table, EMPTY_TABLE, "New table is empty (0 rows)", Severity.WARNING)]
+        return [make_anomaly(
+            table,
+            EMPTY_TABLE,
+            "New table is empty (0 rows)",
+            Severity.WARNING,
+            metric=METRIC_ROW_COUNT,
+            current=row_count,
+        )]
 
     key_columns = key_column_names(table)
     anomalies: list[dict] = []
@@ -56,29 +71,38 @@ def detect_new_table_anomalies(
         # COUNT(DISTINCT) skips NULLs and both counts come from one query, so
         # this is exact; null_rate is rounded and reads 1.0 from 99.995% on.
         if null_count > 0 and distinct_count == 0:
-            anomalies.append(_anomaly(
+            anomalies.append(make_anomaly(
                 table,
                 ALL_NULL_COLUMN,
                 f"Column '{name}' is NULL in all {null_count:,} rows",
                 Severity.WARNING,
+                column=name,
+                metric=METRIC_NULL_COUNT,
+                current=null_count,
             ))
             continue
 
         non_null_rows = row_count - null_count
         if name.lower() in key_columns and distinct_count < non_null_rows:
-            anomalies.append(_anomaly(
+            anomalies.append(make_anomaly(
                 table,
                 DUPLICATE_KEY,
                 f"Key column '{name}' has duplicates: {distinct_count:,} distinct values "
                 f"in {non_null_rows:,} non-NULL rows",
                 Severity.WARNING,
+                column=name,
+                metric=METRIC_DISTINCT_COUNT,
+                current=distinct_count,
             ))
         if distinct_count == 1 and non_null_rows >= CONSTANT_COLUMN_MIN_ROWS:
-            anomalies.append(_anomaly(
+            anomalies.append(make_anomaly(
                 table,
                 CONSTANT_COLUMN,
                 f"Column '{name}' holds one value in all {non_null_rows:,} non-NULL rows",
                 Severity.INFO,
+                column=name,
+                metric=METRIC_DISTINCT_COUNT,
+                current=distinct_count,
             ))
     return anomalies
 
@@ -118,7 +142,3 @@ def escalate_new_table_anomalies(anomalies: Iterable[dict]) -> list[dict]:
         else anomaly
         for anomaly in anomalies
     ]
-
-
-def _anomaly(table: str, anomaly_type: str, message: str, severity: Severity) -> dict:
-    return {"table": table, "type": anomaly_type, "message": message, "severity": severity}

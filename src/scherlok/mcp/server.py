@@ -168,6 +168,8 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     """Profile tables and detect anomalies against the stored baseline.
 
     Returns the anomalies found (type, severity, message per table), capped.
+    Each also carries `column`, `metric`, `baseline`, `current`, `change_pct`
+    and a fixed `hint` on where to look, null when one does not apply.
     Pass `tables` to limit scope, or omit to watch everything. A table with no
     prior baseline gets the new-table checks instead (`empty_table`,
     `all_null_column`, `duplicate_key` as WARNING, `constant_column` as INFO),
@@ -207,7 +209,9 @@ def history(days: int = 30) -> dict[str, Any]:
     """Return anomalies recorded in the last `days` days (capped).
 
     Reads from the local profile store — does not re-profile the warehouse.
-    Only the configured connection's anomalies are returned.
+    Only the configured connection's anomalies are returned. They carry the
+    same fields as `watch`; those recorded before the fields existed have
+    them all null.
     """
     store = _open_store(ScherlokConfig.load().get_connection_string())
     try:

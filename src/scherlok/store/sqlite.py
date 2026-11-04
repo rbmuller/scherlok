@@ -8,11 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from scherlok.config import SCHERLOK_DIR, make_private_dir
+from scherlok.detector.fields import anomaly_details
 
 PROFILES_DB = SCHERLOK_DIR / "profiles.db"
 
 DISTRIBUTION_PROFILE_PREFIX = "distribution:"
 RAW_VALUE_KEYS = ("top_values", "min", "max")
+# Nullable JSON column holding an anomaly's structured fields (#108).
+ANOMALY_DETAILS_COLUMN = "details"
 
 SCOPE_COLUMN = "scope"
 SCOPED_TABLES = ("profiles", "anomalies")
@@ -140,6 +143,15 @@ def _add_runs(conn: sqlite3.Connection) -> None:
     _add_column(conn, "anomalies", RUN_ID_COLUMN, "TEXT")
 
 
+def _add_anomaly_details_column(conn: sqlite3.Connection) -> None:
+    """Add the nullable JSON ``details`` column to anomalies (#108).
+
+    Rows saved before it existed keep NULL there and read back with every
+    structured field set to None.
+    """
+    _add_column(conn, "anomalies", ANOMALY_DETAILS_COLUMN, "TEXT")
+
+
 # Ordered store migrations. PRAGMA user_version records how many a store has
 # applied, so add a migration by appending a function that takes the
 # connection; never reorder or remove one. Every migration must be idempotent:
@@ -148,6 +160,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _strip_raw_distribution_values,  # user_version 1
     _add_scope_columns,  # user_version 2
     _add_runs,  # user_version 3
+    _add_anomaly_details_column,  # user_version 4
 )
 
 
@@ -264,12 +277,16 @@ class ProfileStore:
         ]
 
     def save_anomalies(self, anomalies: list[dict], run_id: str | None = None) -> None:
-        """Save detected anomalies to history, tagged with the run that found them."""
+        """Save detected anomalies to history, tagged with the run that found them.
+
+        The structured fields (#108) are kept as JSON in ``details``.
+        """
         now = datetime.now(timezone.utc).isoformat()
         for a in anomalies:
             self._conn.execute(
-                "INSERT INTO anomalies (table_name, anomaly_type, severity, message, "
-                f"detected_at, {SCOPE_COLUMN}, {RUN_ID_COLUMN}) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO anomalies (table_name, anomaly_type, severity, message, detected_at, "
+                f"{SCOPE_COLUMN}, {RUN_ID_COLUMN}, {ANOMALY_DETAILS_COLUMN}) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     a["table"],
                     a["type"],
@@ -278,15 +295,17 @@ class ProfileStore:
                     now,
                     self._scope,
                     run_id,
+                    json.dumps(anomaly_details(a), default=str),
                 ),
             )
         self._conn.commit()
 
     def get_anomaly_history(self, days: int = 30) -> list[dict[str, Any]]:
-        """Get anomaly history for the last N days."""
+        """Get anomaly history for the last N days, with the structured fields."""
         cutoff = datetime.now(timezone.utc).isoformat()
         rows = self._conn.execute(
-            f"SELECT table_name, anomaly_type, severity, message, detected_at, {RUN_ID_COLUMN} "
+            "SELECT table_name, anomaly_type, severity, message, detected_at, "
+            f"{RUN_ID_COLUMN}, {ANOMALY_DETAILS_COLUMN} "
             "FROM anomalies "
             f"WHERE detected_at >= datetime(?, '-' || ? || ' days') AND {SCOPE_FILTER_SQL} "
             "ORDER BY detected_at DESC",
@@ -300,6 +319,9 @@ class ProfileStore:
                 "message": row["message"],
                 "detected_at": row["detected_at"],
                 RUN_ID_COLUMN: row[RUN_ID_COLUMN],
+                **anomaly_details(
+                    json.loads(row[ANOMALY_DETAILS_COLUMN]) if row[ANOMALY_DETAILS_COLUMN] else {}
+                ),
             }
             for row in rows
         ]

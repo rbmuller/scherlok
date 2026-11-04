@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 
 from scherlok.detector.adaptive import ADAPTIVE_SCORE_THRESHOLD, adaptive_baseline
+from scherlok.detector.anomaly_types import TABLE_EMPTY, VOLUME_DROP, VOLUME_SPIKE
+from scherlok.detector.fields import METRIC_ROW_COUNT, make_anomaly
 from scherlok.detector.severity import Severity, classify_volume_drop
 
 VOLUME_SPIKE_WARNING_PCT = 100  # 2x increase
@@ -27,7 +29,9 @@ def detect_volume_anomalies(
     """Compare current volume against stored profile.
 
     Detects both drops AND spikes.
-    Returns a list of anomaly dicts with keys: table, type, message, severity.
+    Returns a list of anomaly dicts (see ``scherlok.detector.fields``); the
+    ``baseline`` is the learned median when there is enough history, else the
+    stored row count.
     """
     anomalies: list[dict] = []
     current_count = current_profile["row_count"]
@@ -41,12 +45,7 @@ def detect_volume_anomalies(
         score = baseline.score(current_count)
         if score is None or abs(score) <= ADAPTIVE_SCORE_THRESHOLD:
             if previous_count > 0 and current_count == 0:
-                anomalies.append({
-                    "table": table,
-                    "type": "table_empty",
-                    "message": f"Table is now empty (was {previous_count:,} rows)",
-                    "severity": Severity.CRITICAL,
-                })
+                anomalies.append(_table_empty(table, previous_count))
             return anomalies
 
         baseline_count = baseline.center
@@ -59,16 +58,18 @@ def detect_volume_anomalies(
                 if change_pct >= 20
                 else Severity.INFO
             )
-            anomalies.append({
-                "table": table,
-                "type": "volume_drop",
-                "message": (
+            anomalies.append(_volume_anomaly(
+                table,
+                VOLUME_DROP,
+                (
                     f"Row count dropped {change_pct:.1f}% "
                     f"(learned baseline {baseline_count:,.0f} -> {current_count:,}; "
                     f"robust score: {score:+.2f})"
                 ),
-                "severity": severity,
-            })
+                severity,
+                baseline_count,
+                current_count,
+            ))
         elif current_count > baseline_count:
             if baseline_count > 0:
                 change_pct = ((current_count - baseline_count) / baseline_count) * 100
@@ -83,71 +84,93 @@ def detect_volume_anomalies(
             else:
                 severity = Severity.INFO
                 effect = "change from zero"
-            anomalies.append({
-                "table": table,
-                "type": "volume_spike",
-                "message": (
+            anomalies.append(_volume_anomaly(
+                table,
+                VOLUME_SPIKE,
+                (
                     f"Row count spiked ({effect}; learned baseline "
                     f"{baseline_count:,.0f} -> {current_count:,}; "
                     f"robust score: {score:+.2f})"
                 ),
-                "severity": severity,
-            })
+                severity,
+                baseline_count,
+                current_count,
+            ))
 
         if previous_count > 0 and current_count == 0:
-            anomalies.append({
-                "table": table,
-                "type": "table_empty",
-                "message": f"Table is now empty (was {previous_count:,} rows)",
-                "severity": Severity.CRITICAL,
-            })
+            anomalies.append(_table_empty(table, previous_count))
         return anomalies
 
     # Detect drops
     severity = classify_volume_drop(current_count, previous_count)
     if severity is not None:
         drop_pct = ((previous_count - current_count) / previous_count) * 100
-        anomalies.append({
-            "table": table,
-            "type": "volume_drop",
-            "message": (
+        anomalies.append(_volume_anomaly(
+            table,
+            VOLUME_DROP,
+            (
                 f"Row count dropped {drop_pct:.1f}% "
                 f"({previous_count:,} -> {current_count:,})"
             ),
-            "severity": severity,
-        })
+            severity,
+            previous_count,
+            current_count,
+        ))
 
     # Detect spikes
     if previous_count > 0 and current_count > previous_count:
         spike_pct = ((current_count - previous_count) / previous_count) * 100
         if spike_pct >= VOLUME_SPIKE_CRITICAL_PCT:
-            anomalies.append({
-                "table": table,
-                "type": "volume_spike",
-                "message": (
-                    f"Row count spiked {spike_pct:.0f}% "
-                    f"({previous_count:,} -> {current_count:,})"
-                ),
-                "severity": Severity.CRITICAL,
-            })
+            spike_severity = Severity.CRITICAL
         elif spike_pct >= VOLUME_SPIKE_WARNING_PCT:
-            anomalies.append({
-                "table": table,
-                "type": "volume_spike",
-                "message": (
+            spike_severity = Severity.WARNING
+        else:
+            spike_severity = None
+        if spike_severity is not None:
+            anomalies.append(_volume_anomaly(
+                table,
+                VOLUME_SPIKE,
+                (
                     f"Row count spiked {spike_pct:.0f}% "
                     f"({previous_count:,} -> {current_count:,})"
                 ),
-                "severity": Severity.WARNING,
-            })
+                spike_severity,
+                previous_count,
+                current_count,
+            ))
 
     # Detect table going empty
     if previous_count > 0 and current_count == 0:
-        anomalies.append({
-            "table": table,
-            "type": "table_empty",
-            "message": f"Table is now empty (was {previous_count:,} rows)",
-            "severity": Severity.CRITICAL,
-        })
+        anomalies.append(_table_empty(table, previous_count))
 
     return anomalies
+
+
+def _volume_anomaly(
+    table: str,
+    anomaly_type: str,
+    message: str,
+    severity: Severity,
+    baseline: float,
+    current: int,
+) -> dict:
+    return make_anomaly(
+        table,
+        anomaly_type,
+        message,
+        severity,
+        metric=METRIC_ROW_COUNT,
+        baseline=baseline,
+        current=current,
+    )
+
+
+def _table_empty(table: str, previous_count: int) -> dict:
+    return _volume_anomaly(
+        table,
+        TABLE_EMPTY,
+        f"Table is now empty (was {previous_count:,} rows)",
+        Severity.CRITICAL,
+        previous_count,
+        0,
+    )

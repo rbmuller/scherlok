@@ -1,5 +1,7 @@
 """Freshness anomaly detection — tables not updated within expected cadence."""
 
+from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL, FRESHNESS_STALE
+from scherlok.detector.fields import METRIC_HOURS_SINCE_UPDATE, make_anomaly
 from scherlok.detector.severity import Severity
 
 # If hours_since_update doubles vs stored profile, something may be wrong
@@ -33,24 +35,29 @@ def detect_freshness_anomalies(
     ratio = current_hours / stored_hours if stored_hours > 0 else 0
 
     if ratio >= FRESHNESS_CRITICAL_MULTIPLIER:
-        anomalies.append({
-            "table": table,
-            "type": "freshness_critical",
-            "message": (
-                f"Table has not been updated for {current_hours:.1f}h "
-                f"(expected ~{stored_hours:.1f}h, {ratio:.1f}x overdue)"
-            ),
-            "severity": Severity.CRITICAL,
-        })
+        anomaly_type = FRESHNESS_CRITICAL
+        severity = Severity.CRITICAL
+        message = (
+            f"Table has not been updated for {current_hours:.1f}h "
+            f"(expected ~{stored_hours:.1f}h, {ratio:.1f}x overdue)"
+        )
     elif ratio >= FRESHNESS_WARNING_MULTIPLIER:
-        anomalies.append({
-            "table": table,
-            "type": "freshness_stale",
-            "message": (
-                f"Table update delayed: {current_hours:.1f}h since last update "
-                f"(expected ~{stored_hours:.1f}h, {ratio:.1f}x overdue)"
-            ),
-            "severity": Severity.WARNING,
-        })
+        anomaly_type = FRESHNESS_STALE
+        severity = Severity.WARNING
+        message = (
+            f"Table update delayed: {current_hours:.1f}h since last update "
+            f"(expected ~{stored_hours:.1f}h, {ratio:.1f}x overdue)"
+        )
+    else:
+        return anomalies
 
+    anomalies.append(make_anomaly(
+        table,
+        anomaly_type,
+        message,
+        severity,
+        metric=METRIC_HOURS_SINCE_UPDATE,
+        baseline=stored_hours,
+        current=current_hours,
+    ))
     return anomalies

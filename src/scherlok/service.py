@@ -19,6 +19,7 @@ from scherlok.detector.adaptive import ADAPTIVE_HISTORY_LIMIT
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.cardinality import detect_cardinality_anomalies
 from scherlok.detector.distribution_shift import detect_distribution_shift
+from scherlok.detector.fields import anomaly_details
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.new_table import (
     detect_new_table_anomalies,
@@ -323,13 +324,16 @@ def anomaly_to_dict(anomaly: dict) -> dict[str, Any]:
 
     The detector layer stores ``severity`` as a ``Severity`` enum; serialize it
     to its bare name (``"CRITICAL"``) so MCP/JSON consumers get a stable string
-    rather than ``"Severity.CRITICAL"``.
+    rather than ``"Severity.CRITICAL"``. The structured fields (``column``,
+    ``metric``, ``baseline``, ``current``, ``change_pct``, ``hint``) follow,
+    each None when it does not apply.
     """
     return {
         "table": anomaly.get("table"),
         "type": anomaly.get("type"),
         "severity": _severity_name(anomaly.get("severity", "")),
         "message": anomaly.get("message"),
+        **anomaly_details(anomaly),
     }
 
 

@@ -32,6 +32,7 @@ from scherlok.config import ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
+from scherlok.detector.fields import anomaly_details
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
 from scherlok.detector.severity import Severity
@@ -1290,7 +1291,8 @@ def _dbt_model_payload(
 
     Enum severities serialize as their bare name (e.g. `"CRITICAL"` rather
     than `"Severity.CRITICAL"`) so the JSON contract is stable regardless
-    of how the detector module spells the value.
+    of how the detector module spells the value. The structured fields
+    (`column`, `metric`, `baseline`, `current`, `change_pct`, `hint`) follow.
     """
     return {
         "name": node.name,  # type: ignore[attr-defined]
@@ -1302,6 +1304,7 @@ def _dbt_model_payload(
                 "severity": str(a.get("severity")).rsplit(".", 1)[-1],
                 "type": a.get("type"),
                 "message": a.get("message"),
+                **anomaly_details(a),
             }
             for a in anomalies
         ],

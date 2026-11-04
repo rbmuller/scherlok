@@ -68,13 +68,34 @@ With `--output json`, stdout carries a single object. Rich output goes to stderr
       "table": "orders",
       "type": "volume_drop",
       "severity": "CRITICAL",
-      "message": "Row count dropped 70.0% (1,000 -> 300)"
+      "message": "Row count dropped 70.0% (1,000 -> 300)",
+      "column": null,
+      "metric": "row_count",
+      "baseline": 1000,
+      "current": 300,
+      "change_pct": -70.0,
+      "hint": "Rows were deleted or filtered out; check joins and WHERE clauses changed in this build."
     }
   ]
 }
 ```
 
 Agents get the same gate as the read-only MCP tool `verify(tables, fail_on)`; see [MCP server](mcp.md).
+
+### Structured anomaly fields
+
+Each anomaly carries the facts behind its `message`, so a script or an agent can act on it without parsing the sentence. A field that does not apply is `null`.
+
+| Field | Meaning |
+|---|---|
+| `column` | The column involved; `null` for a table-level anomaly such as `volume_drop`. |
+| `metric` | What was measured: `row_count`, `column_type`, `hours_since_update`, `null_rate`, `null_count`, `mean`, `distinct_count`, or `distinct_ratio` (distinct values per non-NULL row, compared on near-unique columns). |
+| `baseline` | The value compared against: the stored profile, or the median of recent runs once there is enough history. `null` for a table seen for the first time and for an added column. |
+| `current` | The value on this run; `null` for a removed column. |
+| `change_pct` | Signed change from `baseline` to `current` in percent, one decimal, negative when the value fell. For `null_rate` it is the relative change of the rate, not percentage points. `null` unless both are numbers and `baseline` is not 0. |
+| `hint` | One fixed sentence per anomaly type on where to look first. `--explain` gives a reasoned hypothesis instead. |
+
+`baseline` and `current` are aggregates (counts, rates, means, hours) or column types, never a value read from a row. The same fields appear in `scherlok history --output json`, `scherlok dbt --output json`, `scherlok dbt-run-and-watch --output json` and the MCP `watch`, `verify` and `history` tools. Anomalies recorded by an older release have them all `null`.
 
 ## Run records
 

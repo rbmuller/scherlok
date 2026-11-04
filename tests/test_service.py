@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from scherlok.detector.fields import DETAIL_FIELDS
 from scherlok.detector.severity import Severity
 from scherlok.service import (
     UnknownTablesError,
@@ -16,6 +17,8 @@ from scherlok.service import (
     verify_tables,
 )
 from scherlok.store.sqlite import ProfileStore
+
+NO_DETAILS = dict.fromkeys(DETAIL_FIELDS)
 
 
 class FakeConnector:
@@ -209,8 +212,10 @@ def test_verification_result_to_dict():
         "warning": 1,
         "info": 0,
         "anomalies": [
-            {"table": "users", "type": "volume_drop", "severity": "CRITICAL", "message": "m"},
-            {"table": "users", "type": "null_rate", "severity": "WARNING", "message": "n"},
+            {"table": "users", "type": "volume_drop", "severity": "CRITICAL", "message": "m",
+             **NO_DETAILS},
+            {"table": "users", "type": "null_rate", "severity": "WARNING", "message": "n",
+             **NO_DETAILS},
         ],
     }
 
