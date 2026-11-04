@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fail_on
 from scherlok.connectors.base import BaseConnector
@@ -38,6 +38,11 @@ VOLUME_PROFILE = "volume"
 ANOMALIES_KEY = "anomalies"
 TABLES_VERIFIED_KEY = "tables_verified"
 TABLES_WITHOUT_BASELINE_KEY = "tables_without_baseline"
+
+REDACTED = "***"
+# Query parameters whose value is a credential, matched as part of the
+# lower-cased key: `password`, `sslpassword`, `motherduck_token`, `api_key`.
+SECRET_QUERY_KEY_PARTS = ("password", "passwd", "pwd", "token", "secret", "key")
 
 # Spellings of one adapter that must share a scope.
 SCOPE_SCHEME_ALIASES = {"postgres": "postgresql"}
@@ -229,23 +234,53 @@ def verify_tables(
 
 
 def redact_connection(connection_string: str) -> str:
-    """Mask the password in a connection string for safe display.
+    """Mask the credentials in a connection string for safe display.
 
-    ``postgresql://alice:secret@host/db`` -> ``postgresql://alice:***@host/db``.
-    Returns the input unchanged when there's no password to hide.
+    ``postgresql://alice:secret@host/db`` -> ``postgresql://alice:***@host/db``,
+    and the value of a query parameter such as ``password`` or ``token`` is
+    masked too. When an ``@`` follows the host, an unencoded ``/``, ``?`` or
+    ``#`` in the password may have cut the host short, leaving part of the
+    password after it, so everything up to the last ``@`` is masked. Returns
+    the input unchanged when there's nothing to hide.
     """
-    if not connection_string:
+    if not connection_string or "://" not in connection_string:
         return connection_string
     parts = urlsplit(connection_string)
-    if not parts.password:
+    if _at_sign_after_host(parts):
+        scheme, rest = connection_string.split("://", 1)
+        return f"{scheme}://{REDACTED}@{rest.rsplit('@', 1)[1]}"
+    netloc = parts.netloc
+    if parts.password:
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        userinfo = f"{parts.username}:{REDACTED}" if parts.username else REDACTED
+        netloc = f"{userinfo}@{host}"
+    query = _redact_query(parts.query)
+    if netloc == parts.netloc and query == parts.query:
         return connection_string
-    host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    userinfo = f"{parts.username}:***" if parts.username else "***"
-    return urlunsplit(
-        (parts.scheme, f"{userinfo}@{host}", parts.path, parts.query, parts.fragment)
+    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def _at_sign_after_host(parts: SplitResult) -> bool:
+    """True when an ``@`` follows the host, so the parsed host can't be trusted."""
+    return bool(parts.netloc) and any(
+        "@" in piece for piece in (parts.path, parts.query, parts.fragment)
     )
+
+
+def _redact_query(query: str) -> str:
+    """Mask the values of credential parameters, keeping the others readable."""
+    pairs = parse_qsl(query, keep_blank_values=True)
+    if not any(_is_secret_query_key(key) for key, _ in pairs):
+        return query
+    masked = [(key, REDACTED if _is_secret_query_key(key) else value) for key, value in pairs]
+    return urlencode(masked, safe="*")
+
+
+def _is_secret_query_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(part in lowered for part in SECRET_QUERY_KEY_PARTS)
 
 
 def connection_scope(connection_string: str | None) -> str | None:
@@ -267,7 +302,7 @@ def connection_scope(connection_string: str | None) -> str | None:
     if not connection_string or "://" not in connection_string:
         return None
     parts = urlsplit(connection_string)
-    if parts.netloc and any("@" in piece for piece in (parts.path, parts.query, parts.fragment)):
+    if _at_sign_after_host(parts):
         return None
     try:
         port = parts.port

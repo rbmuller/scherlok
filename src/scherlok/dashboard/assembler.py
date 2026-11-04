@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from scherlok import __version__
 from scherlok.dashboard.grouping import Incident, group_anomalies
+from scherlok.service import redact_connection
 from scherlok.store.sqlite import ProfileStore
 
 SPARKLINE_POINTS = 8
@@ -245,27 +246,13 @@ def _meta(
     now = datetime.now(timezone.utc)
     return {
         "project_name": project_name,
-        "connection": _redact_connection(connection_string),
+        "connection": redact_connection(connection_string),
         "generated_at": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
         "last_watch_iso": last_watch_iso,
         "last_watch_human": _humanize_iso(last_watch_iso),
         "baseline_window_days": days,
         "version": __version__,
     }
-
-
-def _redact_connection(connection: str) -> str:
-    """Mask password in URL-style connection strings for screenshot safety."""
-    if "://" not in connection or "@" not in connection:
-        return connection
-    scheme, rest = connection.split("://", 1)
-    if "@" not in rest:
-        return connection
-    creds, host = rest.split("@", 1)
-    if ":" in creds:
-        user, _ = creds.split(":", 1)
-        return f"{scheme}://{user}:***@{host}"
-    return connection
 
 
 def _humanize_iso(iso: str | None) -> str:

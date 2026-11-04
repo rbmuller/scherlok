@@ -7,7 +7,6 @@ import pytest
 
 from scherlok.dashboard.assembler import (
     _humanize_iso,
-    _redact_connection,
     assemble_view,
 )
 from scherlok.detector.severity import Severity
@@ -104,18 +103,6 @@ def test_assemble_dbt_context_passthrough(store):
 def test_assemble_no_dbt_context_default(store):
     view = assemble_view(store)
     assert view["dbt_context"] is None
-
-
-def test_redact_connection_masks_password():
-    out = _redact_connection("postgresql://alice:s3cret@host:5432/demo")
-    assert "s3cret" not in out
-    assert "alice" in out
-    assert "***" in out
-
-
-def test_redact_connection_passthrough_when_no_password():
-    assert _redact_connection("bigquery://my-proj/my-dataset") == "bigquery://my-proj/my-dataset"
-    assert _redact_connection("snowflake://acc/db/schema") == "snowflake://acc/db/schema"
 
 
 def test_humanize_iso_recent():
