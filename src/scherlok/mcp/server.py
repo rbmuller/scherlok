@@ -28,6 +28,7 @@ from scherlok.service import (
     TABLES_VERIFIED_KEY,
     TABLES_WITHOUT_BASELINE_KEY,
     anomaly_to_dict,
+    connection_scope,
     profile_and_detect,
     redact_connection,
     select_tables,
@@ -77,6 +78,14 @@ def _connect() -> BaseConnector:
     return connector
 
 
+def _open_store(connection_string: str | None) -> ProfileStore:
+    """Open the profile store for the database a connection points at.
+
+    Baselines are kept per database; see `service.connection_scope`.
+    """
+    return ProfileStore(scope=connection_scope(connection_string))
+
+
 def _watch_tables(tables: list[str] | None) -> tuple[int, list[dict]]:
     """Profile, detect and save profiles and anomalies for `tables` (None = all).
 
@@ -85,7 +94,7 @@ def _watch_tables(tables: list[str] | None) -> tuple[int, list[dict]]:
     """
     connector = _connect()
     targets = select_tables(tables, connector.list_tables())
-    store = ProfileStore()
+    store = _open_store(connector.connection_string)
     try:
         all_anomalies: list[dict] = []
         for table in targets:
@@ -127,7 +136,7 @@ def investigate(tables: list[str] | None = None) -> dict[str, Any]:
     """
     connector = _connect()
     targets = select_tables(tables, connector.list_tables())
-    store = ProfileStore()
+    store = _open_store(connector.connection_string)
     try:
         profiled = []
         for table in targets:
@@ -165,7 +174,7 @@ def status() -> dict[str, Any]:
     days. A quick health glance without profiling anything.
     """
     connector = _connect()
-    store = ProfileStore()
+    store = _open_store(connector.connection_string)
     try:
         recent = store.get_anomaly_history(days=30)
         return {
@@ -181,8 +190,9 @@ def history(days: int = 30) -> dict[str, Any]:
     """Return anomalies recorded in the last `days` days (capped).
 
     Reads from the local profile store — does not re-profile the warehouse.
+    Only the configured connection's anomalies are returned.
     """
-    store = ProfileStore()
+    store = _open_store(ScherlokConfig.load().get_connection_string())
     try:
         rows = store.get_anomaly_history(days=days)
         return {
@@ -225,7 +235,7 @@ def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> 
     """
     threshold = normalize_fail_on(fail_on)
     connector = _connect()
-    store = ProfileStore()
+    store = _open_store(connector.connection_string)
     try:
         result = verify_tables(connector, store, tables, threshold)
     finally:

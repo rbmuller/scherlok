@@ -75,6 +75,12 @@ The container defaults to UTC unless its local timezone has been configured.
 
 Remote stores (`s3://`, `gs://`, `az://`) let CI runners and teammates share one baseline; the file is synced down before a run and back up after it.
 
+One store can serve several databases. Each baseline belongs to the database it was learned from, so an `orders` table in staging and an `orders` table in production keep separate histories, and watching one never moves the other's baseline. `history`, `status`, `report` and `dashboard` show the configured connection's records only.
+
+The database is identified by its *scope*: the adapter, host, port and path of the connection string, such as `postgresql://db.example.com/shop`, `snowflake://my-account/SHOP/PUBLIC` or `duckdb:///data/warehouse.duckdb`. The user, password, query string and fragment are never part of it. Spellings of one database share a scope: the adapter and host are lower-cased, `postgres://` counts as `postgresql://`, and the default port (5432, 3306) is dropped. Another host name or IP address for the same server is a new scope with a new baseline, so give every runner that shares a store the same connection string.
+
+Records saved before scopes existed have none and keep counting for every connection, so an upgrade keeps its history; new records are saved under their scope. A runner still on an older release saves records without a scope, which count for every connection again, so upgrade every runner that shares a store.
+
 ## What Scherlok stores
 
 `profiles.db` holds aggregates and metadata only. No value read from a row of your tables is saved:
@@ -86,6 +92,7 @@ Remote stores (`s3://`, `gs://`, `az://`) let CI runners and teammates share one
 | Freshness | the table's last-modified time as the warehouse reports it, hours since then |
 | Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
 | Anomaly history | table, anomaly type, severity, message, detection time |
+| Scope, on every profile and anomaly | adapter, host, port and path of the connection, never credentials |
 
 Anomaly messages quote the same aggregates and column names. Under `scherlok dbt` and `scherlok dbt-run-and-watch` they also name the downstream dbt models and exposures, with the exposure owners declared in your dbt project.
 
