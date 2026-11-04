@@ -89,13 +89,13 @@ Each anomaly carries the facts behind its `message`, so a script or an agent can
 | Field | Meaning |
 |---|---|
 | `column` | The column involved; `null` for a table-level anomaly such as `volume_drop`. |
-| `metric` | What was measured: `row_count`, `column_type`, `hours_since_update`, `null_rate`, `null_count`, `mean`, `distinct_count`, or `distinct_ratio` (distinct values per non-NULL row, compared on near-unique columns). |
+| `metric` | What was measured: `row_count`, `column_type`, `hours_since_update`, `null_rate`, `null_count`, `mean`, `distinct_count`, or `distinct_ratio` (distinct values per non-NULL row, compared on near-unique columns); [`reconcile`](reconcile.md) adds `duplicate_keys`, `missing_keys`, `extra_keys` and `sum`. |
 | `baseline` | The value compared against: the stored profile, or the median of recent runs once there is enough history. `null` for a table seen for the first time and for an added column. |
 | `current` | The value on this run; `null` for a removed column. |
 | `change_pct` | Signed change from `baseline` to `current` in percent, one decimal, negative when the value fell. For `null_rate` it is the relative change of the rate, not percentage points. `null` unless both are numbers and `baseline` is not 0. |
 | `hint` | One fixed sentence per anomaly type on where to look first. `--explain` gives a reasoned hypothesis instead. |
 
-`baseline` and `current` are aggregates (counts, rates, means, hours) or column types, never a value read from a row. The same fields appear in `scherlok history --output json`, `scherlok dbt --output json`, `scherlok dbt-run-and-watch --output json` and the MCP `watch`, `verify` and `history` tools. Anomalies recorded by an older release have them all `null`.
+`baseline` and `current` are aggregates (counts, rates, means, hours) or column types, never a value read from a row. The same fields appear in `scherlok history --output json`, `scherlok dbt --output json`, `scherlok dbt-run-and-watch --output json`, `scherlok reconcile --output json` and the MCP `watch`, `verify`, `history` and `reconcile` tools. Anomalies recorded by an older release have them all `null`.
 
 ## Run records
 

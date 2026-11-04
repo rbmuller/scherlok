@@ -42,12 +42,19 @@ from scherlok.explainer import (
     format_unavailable_note,
 )
 from scherlok.output import error as out_error
-from scherlok.output import get_console, is_quiet, verbose_info
+from scherlok.output import get_console, is_quiet, is_verbose, verbose_info
 from scherlok.output import info as out_info
 from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
+from scherlok.reconcile import (
+    ReconcileError,
+    ReconcileResult,
+    format_total,
+    reconcile_tables,
+    validate_reconcile_args,
+)
 from scherlok.runs import (
     COMMAND_CHECK,
     COMMAND_CI,
@@ -733,6 +740,151 @@ def verify(
         if json_mode:
             set_stderr(False)
             set_verbosity(quiet=prev_quiet)
+
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+def _reconcile_comparison(result: ReconcileResult) -> Table:
+    """Side-by-side counts and totals of the source and the target."""
+    source, target = result.source, result.target
+    tbl = Table(title=f"Reconcile {rich_escape(source.table)} -> {rich_escape(target.table)}")
+    tbl.add_column("")
+    tbl.add_column(rich_escape(source.table), justify="right")
+    tbl.add_column(rich_escape(target.table), justify="right")
+    tbl.add_row("rows", f"{source.row_count:,}", f"{target.row_count:,}")
+    if result.key_columns:
+        tbl.add_row("rows with a NULL key", f"{source.null_keys:,}", f"{target.null_keys:,}")
+        tbl.add_row("distinct keys", f"{source.distinct_keys:,}", f"{target.distinct_keys:,}")
+        tbl.add_row(
+            "keys on more than one row", f"{source.duplicate_keys:,}", f"{target.duplicate_keys:,}"
+        )
+        tbl.add_row(
+            "keys the other table lacks", f"{result.missing_keys:,}", f"{result.extra_keys:,}"
+        )
+    for column in result.sum_columns:
+        tbl.add_row(
+            f"total {rich_escape(column)}",
+            rich_escape(format_total(source.sums[column])),
+            rich_escape(format_total(target.sums[column])),
+        )
+    return tbl
+
+
+def _print_reconcile(result: ReconcileResult) -> None:
+    """Render a reconcile for people: the comparison, any findings, the verdict.
+
+    A failed verdict goes through out_error so it still shows under --quiet.
+    Table and column names are escaped: they are user input and could hold
+    Rich markup.
+    """
+    if not is_quiet():
+        get_console().print(_reconcile_comparison(result))
+        if result.anomalies:
+            print_anomalies([
+                {**anomaly, "table": rich_escape(anomaly["table"]),
+                 "message": rich_escape(anomaly["message"])}
+                for anomaly in result.anomalies
+            ])
+    pair = f"{rich_escape(result.target.table)} against {rich_escape(result.source.table)}"
+    if result.passed:
+        checked = ["row count"]
+        if result.key_columns:
+            checked.append(f"key {', '.join(result.key_columns)}")
+        if result.sum_columns:
+            checked.append(f"totals of {', '.join(result.sum_columns)}")
+        out_info(
+            f"[green]Reconcile passed:[/green] {pair} "
+            f"({rich_escape('; '.join(checked))}). Nothing was saved."
+        )
+    else:
+        count = len(result.anomalies)
+        types = ", ".join(dict.fromkeys(anomaly["type"] for anomaly in result.anomalies))
+        out_error(
+            f"[red]Reconcile failed:[/red] {pair}: {count} "
+            f"{'mismatch' if count == 1 else 'mismatches'} ({types}). Nothing was saved."
+        )
+
+
+@app.command()
+def reconcile(
+    source: str = typer.Option(
+        ..., "--source",
+        help="The input table, e.g. raw.orders. A dot separates schema and table.",
+    ),
+    target: str = typer.Option(
+        ..., "--target", help="The output table built from the source, e.g. mart.orders.",
+    ),
+    key: list[str] = typer.Option(
+        None, "--key",
+        help="Key column, unique in the target. Repeat for a composite key. "
+        "Checks repeated, missing and extra keys.",
+    ),
+    sum_columns: list[str] = typer.Option(
+        None, "--sum", help="Column whose total must match. Repeat for several.",
+    ),
+    tolerance: float = typer.Option(
+        0.0, "--tolerance",
+        help="Largest absolute difference allowed between two totals (default 0: exact).",
+    ),
+    output: str = typer.Option(
+        OUTPUT_TEXT, "--output",
+        help="Output format: 'text' (default) or 'json' (one object on stdout)",
+    ),
+) -> None:
+    """Check that an output table adds up against its input, in the same database.
+
+    Compares row counts; with --key, keys repeated in the target (a join that
+    fans out), source keys missing from it and target keys the source lacks;
+    with --sum, column totals, which may differ by at most --tolerance. Any
+    mismatch exits 1. Reads the warehouse only: nothing is saved, and only
+    counts and totals are reported, never a key value. On BigQuery and
+    Snowflake every check scans both tables in full.
+
+    Example:
+        scherlok reconcile --source raw.orders --target mart.orders --key order_id
+        scherlok reconcile --source raw.orders --target mart.orders \\
+            --key order_id --sum amount --tolerance 0.001 --output json
+    """
+    output_lower = output.lower()
+    if output_lower not in OUTPUT_FORMATS:
+        out_error(
+            f"[red]Invalid --output value '{rich_escape(output)}'. Use 'text' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=1)
+    json_mode = output_lower == OUTPUT_JSON
+
+    from scherlok.output import set_stderr, set_verbosity
+
+    prev_verbose, prev_quiet = is_verbose(), is_quiet()
+    if json_mode:
+        # Same contract as `verify --output json`: stdout carries only the
+        # payload, and every Rich line goes to stderr.
+        set_stderr(True)
+        set_verbosity(quiet=True)
+
+    try:
+        try:
+            keys, sums = validate_reconcile_args(source, target, key, sum_columns, tolerance)
+        except ValueError as exc:
+            out_error(f"[red]{rich_escape(str(exc))}[/red]")
+            raise typer.Exit(code=1) from exc
+        connector = _get_connector_or_exit()
+        try:
+            result = reconcile_tables(
+                connector, source, target,
+                key_columns=keys, sum_columns=sums, tolerance=tolerance,
+            )
+        except (ValueError, ReconcileError, NotImplementedError) as exc:
+            out_error(f"[red]{rich_escape(str(exc))}[/red]")
+            raise typer.Exit(code=1) from exc
+        if json_mode:
+            print(json.dumps(result.to_dict()))
+        _print_reconcile(result)
+    finally:
+        if json_mode:
+            set_stderr(False)
+            set_verbosity(verbose=prev_verbose, quiet=prev_quiet)
 
     if not result.passed:
         raise typer.Exit(code=1)

@@ -96,6 +96,26 @@ class BigQueryConnector(BaseConnector):
         result = self._client.query(sql).result()
         return [dict(row) for row in result]
 
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        """Quote a BigQuery identifier in backticks.
+
+        Inside backticks BigQuery reads the escape sequences of a string
+        literal, so a backslash and a backtick are escaped with a backslash.
+        """
+        escaped = identifier.replace("\\", "\\\\").replace("`", "\\`")
+        return f"`{escaped}`"
+
+    def _table_name_parts(self, table: str) -> list[str]:
+        """``table`` in the connection's dataset, ``dataset.table`` or ``project.dataset.table``."""
+        parts = super()._table_name_parts(table)
+        defaults = [self._project, self._dataset][: self.MAX_TABLE_NAME_PARTS - len(parts)]
+        return [*defaults, *parts]
+
+    def _fetch_one(self, sql: str) -> dict[str, Any]:
+        """Run ``sql`` and return its single row keyed by column alias."""
+        return self._query(sql)[0]
+
     def list_tables(self) -> list[str]:
         """List all tables in the dataset."""
         dataset_ref = self._client.dataset(self._dataset)

@@ -6,7 +6,7 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
-from scherlok.connectors.base import BaseConnector
+from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
 
 
 class PostgresConnector(BaseConnector):
@@ -59,6 +59,17 @@ class PostgresConnector(BaseConnector):
     def _cursor(self) -> Any:
         """Return a dict cursor."""
         return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        """Quote a PostgreSQL identifier, doubling any embedded double quote."""
+        return quote_ansi_identifier(identifier)
+
+    def _fetch_one(self, sql: str) -> dict[str, Any]:
+        """Run ``sql`` and return its single row keyed by column alias."""
+        with self._cursor() as cur:
+            cur.execute(sql)
+            return dict(cur.fetchone())
 
     def list_tables(self) -> list[str]:
         """List all user tables and views in the public schema."""

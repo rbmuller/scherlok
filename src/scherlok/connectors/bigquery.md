@@ -77,6 +77,18 @@ For a dataset with **T** tables averaging **C** columns each: ~`T + 3·T·C` bil
 
 A `maximum_bytes_billed` guard is on the roadmap to make per-query budget caps explicit. Until then, control cost via cadence + `--select` scoping.
 
+### `scherlok reconcile`
+
+`reconcile` compares two tables and scans both in full on every run; it has no partition filter yet. Per run:
+
+| Query | Reads | Billed? |
+|-------|-------|---------|
+| Row count and key statistics (`GROUP BY` on the key), once per table | the `--key` columns | **Yes** |
+| `SUM` of each `--sum` column, once per table | the `--sum` columns | **Yes** |
+| Anti-join for missing keys, then for extra keys | the `--key` columns of both tables, twice | **Yes** |
+
+That is about three reads of each table's key columns plus one of each sum column. Try it on a small pair of tables first, and run it on the tables a build just wrote rather than over a whole dataset. Table names may be `table` (in the connection's dataset), `dataset.table` or `project.dataset.table`. See the [reconcile guide](https://rbmuller.github.io/scherlok/reconcile/).
+
 ## dbt + BigQuery
 
 If you already use dbt with BigQuery, skip the `connect` step and let Scherlok read `profiles.yml`:
