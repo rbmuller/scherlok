@@ -181,6 +181,11 @@ class VerificationResult:
     def passed(self) -> bool:
         return not fails_gate(self.anomalies, self.fail_on)
 
+    @property
+    def tables_checked(self) -> list[str]:
+        """Every table the verification profiled, with or without a baseline."""
+        return [*self.tables_verified, *self.tables_without_baseline]
+
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe form shared by `scherlok verify --output json` and MCP `verify`."""
         return {

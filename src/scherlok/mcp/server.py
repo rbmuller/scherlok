@@ -23,6 +23,13 @@ from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fa
 from scherlok.config import ENV_CONNECTION, ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.connectors.base import BaseConnector
+from scherlok.runs import (
+    COMMAND_CHECK,
+    COMMAND_VERIFY,
+    COMMAND_WATCH,
+    RunRecord,
+    mcp_command,
+)
 from scherlok.service import (
     ANOMALIES_KEY,
     TABLES_VERIFIED_KEY,
@@ -51,6 +58,11 @@ _VERIFY_CAPS = {
     TABLES_VERIFIED_KEY: MAX_TABLES,
     TABLES_WITHOUT_BASELINE_KEY: MAX_TABLES,
 }
+
+# Commands the run records of these tools carry.
+MCP_WATCH = mcp_command(COMMAND_WATCH)
+MCP_CHECK = mcp_command(COMMAND_CHECK)
+MCP_VERIFY = mcp_command(COMMAND_VERIFY)
 
 
 class ConnectionNotConfiguredError(RuntimeError):
@@ -86,9 +98,12 @@ def _open_store(connection_string: str | None) -> ProfileStore:
     return ProfileStore(scope=connection_scope(connection_string))
 
 
-def _watch_tables(tables: list[str] | None) -> tuple[int, list[dict]]:
+def _watch_tables(
+    tables: list[str] | None, command: str, fail_on: str = FAIL_ON_CRITICAL
+) -> tuple[int, list[dict]]:
     """Profile, detect and save profiles and anomalies for `tables` (None = all).
 
+    The run is recorded under `command`, judged by `fail_on`, passing or not.
     Returns ``(tables_watched, anomalies)`` with the raw anomaly dicts, so
     `check` can decide the gate on every anomaly, not on the capped output.
     """
@@ -96,12 +111,14 @@ def _watch_tables(tables: list[str] | None) -> tuple[int, list[dict]]:
     targets = select_tables(tables, connector.list_tables())
     store = _open_store(connector.connection_string)
     try:
+        run = RunRecord(command=command, scope=store.scope, fail_on=fail_on)
         all_anomalies: list[dict] = []
         for table in targets:
             anomalies, _vol = profile_and_detect(connector, store, table)
             all_anomalies.extend(anomalies)
         if all_anomalies:
-            store.save_anomalies(all_anomalies)
+            store.save_anomalies(all_anomalies, run_id=run.run_id)
+        store.save_run(run.finish(targets, all_anomalies).to_dict())
         return len(targets), all_anomalies
     finally:
         store.close()
@@ -156,7 +173,7 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     `all_null_column`, `duplicate_key` as WARNING, `constant_column` as INFO),
     and its baseline is set for next time.
     """
-    tables_watched, anomalies = _watch_tables(tables)
+    tables_watched, anomalies = _watch_tables(tables, MCP_WATCH)
     return {
         "tables_watched": tables_watched,
         "anomaly_count": len(anomalies),
@@ -213,7 +230,7 @@ def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
     `passed` plus the severity counts the decision was based on.
     """
     threshold = normalize_fail_on(fail_on)
-    _tables_watched, anomalies = _watch_tables(tables=None)
+    _tables_watched, anomalies = _watch_tables(None, MCP_CHECK, threshold)
     return {
         "passed": not fails_gate(anomalies, threshold),
         "fail_on": threshold,
@@ -222,22 +239,25 @@ def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
 
 
 def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
-    """Compare tables with the stored baseline and return a pass/fail gate, saving nothing.
+    """Compare tables with the stored baseline and return a pass/fail gate, leaving it unchanged.
 
     Read-only, unlike `watch` and `check`: no profiles or anomalies are
     written, so retrying after a failure keeps failing until the data is
-    fixed. Pass `tables` to limit scope, or omit to verify everything.
-    `fail_on` is `"critical"` (default) or `"warning"`. Tables with no stored
-    baseline are listed in `tables_without_baseline` and never counted as
-    verified. Naming one in `tables` says it was just built, so an empty
-    table, an all-NULL column or a duplicate key there is CRITICAL; unnamed,
-    they stay WARNING. Once the data is right, `investigate` sets a baseline.
+    fixed; only the run itself is recorded. Pass `tables` to limit scope, or
+    omit to verify everything. `fail_on` is `"critical"` (default) or
+    `"warning"`. Tables with no stored baseline are listed in
+    `tables_without_baseline` and never counted as verified. Naming one in
+    `tables` says it was just built, so an empty table, an all-NULL column or
+    a duplicate key there is CRITICAL; unnamed, they stay WARNING. Once the
+    data is right, `investigate` sets a baseline.
     """
     threshold = normalize_fail_on(fail_on)
     connector = _connect()
     store = _open_store(connector.connection_string)
     try:
+        run = RunRecord(command=MCP_VERIFY, scope=store.scope, fail_on=threshold)
         result = verify_tables(connector, store, tables, threshold)
+        store.save_run(run.finish(result.tables_checked, result.anomalies).to_dict())
     finally:
         store.close()
     payload = result.to_dict()

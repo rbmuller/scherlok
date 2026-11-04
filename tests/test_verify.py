@@ -139,7 +139,7 @@ def test_verify_text_mode_reports_the_failure(warehouse):
     assert result.exit_code == 1
     assert "volume_drop" in result.stdout
     assert "Verify failed" in result.stdout
-    assert "Nothing was saved" in result.stdout
+    assert "No profiles or anomalies were saved" in result.stdout
 
 
 def test_verify_passes_on_unchanged_data(warehouse, home):

@@ -34,6 +34,7 @@ from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.freshness import detect_freshness_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
+from scherlok.detector.severity import Severity
 from scherlok.explainer import (
     HISTORY_LOOKBACK_DAYS,
     describe_error,
@@ -46,6 +47,14 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
+from scherlok.runs import (
+    COMMAND_CHECK,
+    COMMAND_CI,
+    COMMAND_VERIFY,
+    COMMAND_WATCH,
+    RunRecord,
+    append_run_record,
+)
 from scherlok.service import (
     UnknownTablesError,
     VerificationResult,
@@ -55,7 +64,7 @@ from scherlok.service import (
     verify_tables,
 )
 from scherlok.store.remote import sync_context
-from scherlok.store.sqlite import ProfileStore
+from scherlok.store.sqlite import RUN_PASSED_KEY, RUN_TABLES_KEY, ProfileStore
 
 OUTPUT_TEXT = "text"
 OUTPUT_JSON = "json"
@@ -290,8 +299,9 @@ def _dispatch_alerts(
     *,
     explain: bool = False,
     explain_context: dict | None = None,
+    run_id: str | None = None,
 ) -> tuple[dict | None, str | None]:
-    """Persist anomalies and fan out to webhook/email alerters.
+    """Persist anomalies, tagged with `run_id`, and fan out to webhook/email alerters.
 
     With `explain`, one Claude call augments the whole batch with a
     root-cause hypothesis that rides along on every alert channel; when it
@@ -308,7 +318,7 @@ def _dispatch_alerts(
         # Must run before save_anomalies so the bundle's recent-history
         # window contains only prior runs, not this very batch.
         explanation, explain_error = _explain_or_note(anomalies, store, explain_context)
-    store.save_anomalies(anomalies)
+    store.save_anomalies(anomalies, run_id=run_id)
     if not is_quiet():
         print_anomalies(anomalies)
         if explanation:
@@ -392,13 +402,16 @@ def _run_watch(
     connector: object | None = None,
     explain: bool = False,
     fail_on: str | None = None,
+    command: str = COMMAND_WATCH,
 ) -> list[dict]:
     """Run the watch logic: profile + detect + alert. Returns all anomalies.
 
-    Reused by `watch`, `ci`, and `dbt` commands. When `tables` is None, all
-    tables visible to the connector are used. When `connector` is None, one
-    is loaded from the saved config. `fail_on` only feeds the --explain
-    context; exit-code policy stays with the callers.
+    Reused by `watch`, `ci` and `check`, recorded as a run under `command`,
+    passing or not. When `tables` is None, all tables visible to the
+    connector are used. When `connector` is None, one is loaded from the
+    saved config. `fail_on` feeds the --explain context and the run record
+    (CRITICAL when None, as `watch` exits); exit-code policy stays with the
+    callers.
     """
     if connector is None:
         connector = _get_connector_or_exit()
@@ -407,6 +420,9 @@ def _run_watch(
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = _open_store(connector.connection_string)
+        run = RunRecord(
+            command=command, scope=store.scope, fail_on=fail_on or FAIL_ON_CRITICAL
+        )
         if tables is None:
             tables = connector.list_tables()
         all_anomalies: list[dict] = []
@@ -427,7 +443,9 @@ def _run_watch(
                 adapter=_adapter_from_connection(cfg.get_connection_string()),
                 fail_on=fail_on,
             ),
+            run_id=run.run_id,
         )
+        store.save_run(run.finish(tables, all_anomalies).to_dict())
 
     return all_anomalies
 
@@ -501,6 +519,7 @@ def _run_ci(
     email: list[str] | None,
     fail_on: str,
     explain: bool = False,
+    command: str = COMMAND_CI,
 ) -> None:
     fail_on = _fail_on_or_exit(fail_on)
 
@@ -517,7 +536,7 @@ def _run_ci(
 
     # Run watch (does profile + detect + alert in one)
     anomalies = _run_watch(
-        webhook=webhook, emails=email or None, explain=explain, fail_on=fail_on
+        webhook=webhook, emails=email or None, explain=explain, fail_on=fail_on, command=command
     )
 
     if fails_gate(anomalies, fail_on):
@@ -575,17 +594,21 @@ def check(
     explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
 ) -> None:
     """Assertion-only CI alias for `scherlok ci --fail-on critical`."""
-    _run_ci(connection_string, webhook, email, fail_on, explain)
+    _run_ci(connection_string, webhook, email, fail_on, explain, command=COMMAND_CHECK)
 
 
 VERIFY_PREVIEW_TABLES = 5
 
 
-def _run_verify(tables: list[str] | None, fail_on: str) -> VerificationResult:
-    """Verify tables against the stored baseline without writing anything.
+def _run_verify(
+    tables: list[str] | None, fail_on: str, record_path: Path | None = None
+) -> VerificationResult:
+    """Verify tables against the stored baseline without changing it.
 
-    No profiles, anomalies or config are saved, and a remote store is
-    downloaded but never uploaded back.
+    No profiles, anomalies or config are saved. The run itself is recorded
+    in the local store, and appended to `record_path` as one JSON line when
+    given. A remote store is downloaded but never uploaded back, so with one
+    the record file is the only copy of the run that outlives the job.
     """
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
@@ -593,13 +616,24 @@ def _run_verify(tables: list[str] | None, fail_on: str) -> VerificationResult:
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB, upload_on_exit=False):
         store = _open_store(connector.connection_string)
+        run = RunRecord(command=COMMAND_VERIFY, scope=store.scope, fail_on=fail_on)
         try:
-            return verify_tables(connector, store, tables, fail_on)
+            result = verify_tables(connector, store, tables, fail_on)
+            record = run.finish(result.tables_checked, result.anomalies).to_dict()
+            store.save_run(record)
         except UnknownTablesError as exc:
             out_error(f"[red]{rich_escape(str(exc))}[/red]")
             raise typer.Exit(code=1) from exc
         finally:
             store.close()
+
+    if record_path is not None:
+        try:
+            append_run_record(record_path, record)
+        except OSError as exc:
+            out_error(f"[red]Could not write the run record: {rich_escape(str(exc))}[/red]")
+            raise typer.Exit(code=1) from exc
+    return result
 
 
 def _print_verification(result: VerificationResult) -> None:
@@ -621,7 +655,7 @@ def _print_verification(result: VerificationResult) -> None:
     severities = ", ".join(f"{count} {name}" for name, count in reversed(counts.items()))
     summary = (
         f"{len(result.tables_verified)} verified, {len(missing)} without baseline, "
-        f"{severities} (--fail-on {result.fail_on}). Nothing was saved."
+        f"{severities} (--fail-on {result.fail_on}). No profiles or anomalies were saved."
     )
     if result.passed:
         out_info(f"[green]Verify passed:[/green] {summary}")
@@ -643,8 +677,12 @@ def verify(
         OUTPUT_TEXT, "--output",
         help="Output format: 'text' (default) or 'json' (one object on stdout)",
     ),
+    record: Path | None = typer.Option(
+        None, "--record", dir_okay=False,
+        help="Also append this run's record to PATH as one JSON line, e.g. a CI artifact.",
+    ),
 ) -> None:
-    """Compare tables with the stored baseline without saving anything.
+    """Compare tables with the stored baseline without changing it.
 
     A read-only gate: unlike `watch` and `ci`, it writes no profiles, no
     anomalies and no config, and never uploads a remote store, so retrying
@@ -652,12 +690,14 @@ def verify(
     baseline are listed and never count as verified; those named with
     --table count as just built, so an empty table, an all-NULL column or a
     duplicate key there is CRITICAL. The connection comes from
-    SCHERLOK_CONNECTION or `scherlok connect`.
+    SCHERLOK_CONNECTION or `scherlok connect`. Each run is recorded in the
+    local store (`scherlok history --runs`); `--record` also appends it to a
+    file, which survives a CI job when the store is remote.
 
     Example:
         scherlok verify
         scherlok verify --table orders --table customers --fail-on warning
-        scherlok verify --output json
+        scherlok verify --output json --record scherlok-runs.jsonl
     """
     output_lower = output.lower()
     if output_lower not in OUTPUT_FORMATS:
@@ -676,7 +716,7 @@ def verify(
         set_verbosity(quiet=True)
 
     try:
-        result = _run_verify(table or None, fail_on)
+        result = _run_verify(table or None, fail_on, record)
         if json_mode:
             print(json.dumps(result.to_dict()))
         # Under the forced quiet of JSON mode only a failed verdict gets
@@ -1653,20 +1693,63 @@ def status(
             set_verbosity(quiet=prev_quiet)
 
 
+# Anomaly counts of `history --runs`, most severe first.
+RUN_COUNT_KEYS = tuple(severity.value.lower() for severity in reversed(Severity))
+
+
+def _print_runs(records: list[dict], days: int, json_mode: bool) -> None:
+    """Render `history --runs`: one JSON array, or a table, newest run first."""
+    if json_mode:
+        print(json.dumps(records))
+        return
+    if not records:
+        console.print(f"[yellow]No runs in the last {days} days.[/yellow]")
+        return
+
+    # Sized for an 80-column terminal: only the anomaly counts wrap. The run
+    # id and the table names are in `--output json`.
+    tbl = Table(title=f"Runs (last {days} days)")
+    tbl.add_column("Started At", no_wrap=True)
+    tbl.add_column("Command", style="cyan", no_wrap=True)
+    tbl.add_column("Result", no_wrap=True)
+    tbl.add_column("--fail-on", no_wrap=True)
+    tbl.add_column("Tables", justify="right", no_wrap=True)
+    tbl.add_column("Anomalies")
+
+    for r in records:
+        result = "[green]passed[/green]" if r[RUN_PASSED_KEY] else "[red]failed[/red]"
+        anomalies = ", ".join(f"{r[key]} {key}" for key in RUN_COUNT_KEYS)
+        tbl.add_row(
+            r["started_at"][:19].replace("T", " "),
+            rich_escape(r["command"]),
+            result,
+            r["fail_on"],
+            str(len(r[RUN_TABLES_KEY])),
+            anomalies,
+        )
+    console.print(tbl)
+
+
 @app.command()
 def history(
     days: int = typer.Option(30, "--days", "-d", help="Number of days to look back"),
+    runs: bool = typer.Option(
+        False, "--runs",
+        help="List runs (watch, ci, check, verify, MCP tools), passing or not, "
+        "instead of anomalies.",
+    ),
     output: str = typer.Option(
         "text", "--output",
         help="Output format: 'text' (default) or 'json' for CI parsers",
     ),
 ) -> None:
-    """Show timeline of detected anomalies.
+    """Show timeline of detected anomalies, or with --runs every recorded run.
 
     Example:
         scherlok history
         scherlok history --days 7
         scherlok history --output json
+        scherlok history --runs --output json
     """
     output_lower = output.lower()
     if output_lower not in ("text", "json"):
@@ -1678,6 +1761,9 @@ def history(
 
     # Scoped to the configured connection, which is read but never opened.
     store = _open_store(ScherlokConfig.load().get_connection_string())
+    if runs:
+        _print_runs(store.get_runs(days=days), days, json_mode)
+        return
     records = store.get_anomaly_history(days=days)
 
     if json_mode:

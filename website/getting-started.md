@@ -91,8 +91,9 @@ Records saved before scopes existed have none and keep counting for every connec
 | Schema | column names, types, nullability |
 | Freshness | the table's last-modified time as the warehouse reports it, hours since then |
 | Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
-| Anomaly history | table, anomaly type, severity, message, detection time |
-| Scope, on every profile and anomaly | adapter, host, port and path of the connection, never credentials |
+| Anomaly history | table, anomaly type, severity, message, detection time, id of the run that found it |
+| Runs | command, Scherlok version, names of the tables checked, `--fail-on`, passed or failed, anomaly count per severity, start and end time |
+| Scope, on every profile, anomaly and run | adapter, host, port and path of the connection, never credentials |
 
 Anomaly messages quote the same aggregates and column names. Under `scherlok dbt` and `scherlok dbt-run-and-watch` they also name the downstream dbt models and exposures, with the exposure owners declared in your dbt project.
 
@@ -105,6 +106,7 @@ Older releases also saved each column's five most frequent values and its minimu
 ```
 scherlok status [--output json]    Health per table
 scherlok history [--days N]        Past anomalies
+scherlok history --runs            Every run, passing or not
 scherlok report [--output json]    Detailed profile summary
 scherlok dashboard --out report.html   Self-contained HTML report
 scherlok config show               Current settings
