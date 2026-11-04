@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from scherlok.connectors.base import BaseConnector
+from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
 
 
 class SnowflakeConnector(BaseConnector):
@@ -125,6 +125,29 @@ class SnowflakeConnector(BaseConnector):
         rows = [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
         cur.close()
         return rows
+
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        """Quote a Snowflake identifier, doubling any embedded double quote."""
+        return quote_ansi_identifier(identifier)
+
+    def _table_name_parts(self, table: str) -> list[str]:
+        """``table`` in the connection's schema, ``schema.table`` or ``database.schema.table``.
+
+        Every part is upper-cased, as the other queries of this connector do,
+        so a quoted name resolves the way the unquoted name would.
+        """
+        parts = super()._table_name_parts(table)
+        defaults = [self._database, self._schema][: self.MAX_TABLE_NAME_PARTS - len(parts)]
+        return [part.upper() for part in [*defaults, *parts]]
+
+    def _quote_column(self, column: str) -> str:
+        """Quote a column name, upper-cased like the rest of this connector."""
+        return self._quote_identifier(column.upper())
+
+    def _fetch_one(self, sql: str) -> dict[str, Any]:
+        """Run ``sql`` and return its single row keyed by lower-case column alias."""
+        return self._query(sql)[0]
 
     def list_tables(self) -> list[str]:
         """List all tables and views in the schema."""

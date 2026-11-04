@@ -19,6 +19,9 @@ from scherlok.connectors.base import BaseConnector
 class MySQLConnector(BaseConnector):
     """Connector for MySQL (and compatible forks such as MariaDB)."""
 
+    # database.table: in MySQL a schema is a database.
+    MAX_TABLE_NAME_PARTS = 2
+
     def __init__(self, connection_string: str) -> None:
         super().__init__(connection_string)
         self._conn: Any = None
@@ -68,6 +71,17 @@ class MySQLConnector(BaseConnector):
     def _cursor(self) -> Any:
         """Return a DictCursor."""
         return self._conn.cursor()
+
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        """Quote a MySQL identifier in backticks, doubling any embedded backtick."""
+        return f"`{identifier.replace('`', '``')}`"
+
+    def _fetch_one(self, sql: str) -> dict[str, Any]:
+        """Run ``sql`` and return its single row keyed by column alias."""
+        with self._cursor() as cur:
+            cur.execute(sql)
+            return dict(cur.fetchone())
 
     def list_tables(self) -> list[str]:
         """List all tables and views in the current database."""

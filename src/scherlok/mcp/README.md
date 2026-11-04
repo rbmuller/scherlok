@@ -90,6 +90,7 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 | `history` | `days?` | anomalies recorded in the last N days |
 | `check` | `fail_on?` | CI-style pass/fail gate (`critical` default, or `warning`) |
 | `verify` | `tables?`, `fail_on?` | read-only pass/fail gate: compares with the baseline, saves no profiles or anomalies; lists `tables_without_baseline`, and fails on a named table that is empty or has an all-NULL column or a duplicate key |
+| `reconcile` | `source`, `target`, `key_columns?`, `sum_columns?`, `tolerance?` | read-only check that an output table adds up against its input: row counts, keys repeated in the target (join fan-out), keys missing or extra, column totals within an absolute `tolerance`; `passed` is false on any mismatch |
 
 Typical agent flow: `investigate` once to set the baseline, then `watch` (or
 `check`) on later runs to catch drift. `watch` and `check` save every run, so
@@ -104,11 +105,20 @@ gate as CRITICAL.
 `mcp:watch`, `mcp:check` and `mcp:verify`; `scherlok history --runs` lists
 them.
 
+After building a table from another, call `reconcile` to check that it adds
+up: `reconcile(source="orders", target="orders_enriched",
+key_columns=["order_id"], sum_columns=["amount"])`. Both tables must be
+listed by `list_tables`, and every key and sum column must exist in both.
+It reads the warehouse only: no profile, anomaly or run is saved. The result
+holds counts and totals, never a key value, and a database error names only
+its type, since its text can quote a row value. Up to 32 key and 32 sum
+columns. See [Reconcile](https://rbmuller.github.io/scherlok/reconcile/).
+
 Baselines and history belong to the database of the configured connection,
 so pointing the server at staging never moves the production baseline, even
 when both share one profile store.
 
-Every anomaly from `watch`, `verify` and `history` carries structured fields
+Every anomaly from `watch`, `verify`, `history` and `reconcile` carries structured fields
 next to `table`, `type`, `severity` and `message`, so the agent does not have
 to parse the sentence to learn what broke:
 

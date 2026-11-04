@@ -25,6 +25,13 @@ ALL_NULL_COLUMN = "all_null_column"
 DUPLICATE_KEY = "duplicate_key"
 CONSTANT_COLUMN = "constant_column"
 
+# An output table checked against its input (scherlok/reconcile.py)
+ROW_COUNT_MISMATCH = "row_count_mismatch"
+DUPLICATE_KEYS = "duplicate_keys"
+MISSING_KEYS = "missing_keys"
+EXTRA_KEYS = "extra_keys"
+SUM_MISMATCH = "sum_mismatch"
+
 ANOMALY_TYPES = frozenset({
     VOLUME_DROP,
     VOLUME_SPIKE,
@@ -41,4 +48,9 @@ ANOMALY_TYPES = frozenset({
     ALL_NULL_COLUMN,
     DUPLICATE_KEY,
     CONSTANT_COLUMN,
+    ROW_COUNT_MISMATCH,
+    DUPLICATE_KEYS,
+    MISSING_KEYS,
+    EXTRA_KEYS,
+    SUM_MISMATCH,
 })

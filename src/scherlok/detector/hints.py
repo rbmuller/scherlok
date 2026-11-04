@@ -14,10 +14,15 @@ from scherlok.detector.anomaly_types import (
     CONSTANT_COLUMN,
     DISTRIBUTION_SHIFT,
     DUPLICATE_KEY,
+    DUPLICATE_KEYS,
     EMPTY_TABLE,
+    EXTRA_KEYS,
     FRESHNESS_CRITICAL,
     FRESHNESS_STALE,
+    MISSING_KEYS,
     NULL_RATE_CHANGE,
+    ROW_COUNT_MISMATCH,
+    SUM_MISMATCH,
     TABLE_EMPTY,
     TYPE_CHANGED,
     VOLUME_DROP,
@@ -80,6 +85,24 @@ ANOMALY_HINTS: dict[str, str] = {
     CONSTANT_COLUMN: (
         "The column holds one value in every row; check for a hard-coded default or a join "
         "that matched a single row."
+    ),
+    ROW_COUNT_MISMATCH: (
+        "Rows were added or lost between source and target; check the joins and filters of the "
+        "build."
+    ),
+    DUPLICATE_KEYS: (
+        "A join fans out; check that every table joined into the target is unique on its join key."
+    ),
+    MISSING_KEYS: (
+        "Source rows were dropped; check inner joins and WHERE filters that can exclude them."
+    ),
+    EXTRA_KEYS: (
+        "The target holds keys the source lacks; check for a stale incremental load, a union or a "
+        "bad join."
+    ),
+    SUM_MISMATCH: (
+        "A total changed; check joins that drop or repeat rows, unit or currency conversions and "
+        "rounding."
     ),
 }
 

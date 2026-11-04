@@ -23,6 +23,7 @@ from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fa
 from scherlok.config import ENV_CONNECTION, ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.connectors.base import BaseConnector
+from scherlok.reconcile import reconcile_tables, validate_reconcile_args
 from scherlok.runs import (
     COMMAND_CHECK,
     COMMAND_VERIFY,
@@ -270,7 +271,48 @@ def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> 
     return payload
 
 
-_TOOLS = [list_tables, investigate, watch, status, history, check, verify]
+def reconcile(
+    source: str,
+    target: str,
+    key_columns: list[str] | None = None,
+    sum_columns: list[str] | None = None,
+    tolerance: float = 0.0,
+) -> dict[str, Any]:
+    """Check that an output table adds up against the input it was built from.
+
+    Read-only: compares `target` with `source` on the configured connection
+    and saves nothing. Always compares row counts. With `key_columns` (unique
+    in the target; several for a composite key) it also counts keys repeated
+    in the target (a join that fans out), source keys missing from the target
+    and target keys the source lacks. With `sum_columns` it compares each
+    column's total, which may differ by at most `tolerance` (absolute).
+    Returns counts and totals only, never a key value; `passed` is false on
+    any mismatch, each a CRITICAL anomaly with a fix hint. Both tables must
+    be listed by `list_tables`.
+    """
+    keys, sums = validate_reconcile_args(source, target, key_columns, sum_columns, tolerance)
+    connector = _connect()
+    select_tables([source, target], connector.list_tables())
+    for table in (source, target):
+        _require_columns(connector, table, [*keys, *sums])
+    result = reconcile_tables(
+        connector, source, target, key_columns=keys, sum_columns=sums, tolerance=tolerance
+    )
+    payload = result.to_dict()
+    payload["truncated"] = len(payload[ANOMALIES_KEY]) > MAX_ANOMALIES
+    payload[ANOMALIES_KEY] = payload[ANOMALIES_KEY][:MAX_ANOMALIES]
+    return payload
+
+
+def _require_columns(connector: BaseConnector, table: str, columns: list[str]) -> None:
+    """Raise ValueError naming the columns `table` lacks, compared case-insensitively."""
+    visible = {column["name"].lower() for column in connector.get_columns(table)}
+    missing = [column for column in columns if column.lower() not in visible]
+    if missing:
+        raise ValueError(f"Columns not found in {table}: {missing}")
+
+
+_TOOLS = [list_tables, investigate, watch, status, history, check, verify, reconcile]
 
 
 def _installed_mcp_version() -> str | None:

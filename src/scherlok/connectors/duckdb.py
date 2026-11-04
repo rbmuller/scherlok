@@ -12,7 +12,7 @@ except ImportError as exc:
         "Install it with: pip install scherlok[duckdb]"
     ) from exc
 
-from scherlok.connectors.base import BaseConnector
+from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
 
 
 class DuckDBConnector(BaseConnector):
@@ -66,7 +66,13 @@ class DuckDBConnector(BaseConnector):
     @staticmethod
     def _quote_identifier(identifier: str) -> str:
         """Quote a DuckDB identifier."""
-        return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
+        return quote_ansi_identifier(identifier)
+
+    def _fetch_one(self, sql: str) -> dict[str, Any]:
+        """Run ``sql`` and return its single row keyed by column alias."""
+        cursor = self._conn.execute(sql)
+        names = [description[0] for description in cursor.description]
+        return dict(zip(names, cursor.fetchone(), strict=True))
 
     def list_tables(self) -> list[str]:
         """List all tables and views in the main schema."""

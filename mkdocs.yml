@@ -55,6 +55,7 @@ nav:
       - CLI integration: dbt.md
       - dbt package: dbt-package.md
   - CI/CD gate: ci-cd.md
+  - Reconcile: reconcile.md
   - Alerts: alerts.md
   - HTML dashboard: dashboard.md
   - MCP server: mcp.md

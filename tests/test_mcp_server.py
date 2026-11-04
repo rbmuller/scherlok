@@ -28,7 +28,9 @@ _HAS_MCP = importlib.util.find_spec("mcp") is not None
 
 pytestmark = pytest.mark.skipif(not _HAS_DUCKDB, reason="duckdb not installed")
 
-EXPECTED_TOOLS = {"list_tables", "investigate", "watch", "status", "history", "check", "verify"}
+EXPECTED_TOOLS = {
+    "list_tables", "investigate", "watch", "status", "history", "check", "verify", "reconcile",
+}
 
 
 @pytest.fixture()

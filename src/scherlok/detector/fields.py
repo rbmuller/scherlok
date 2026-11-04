@@ -45,6 +45,12 @@ METRIC_MEAN = "mean"
 METRIC_DISTINCT_COUNT = "distinct_count"
 # Distinct values per non-NULL row, compared on near-unique columns.
 METRIC_DISTINCT_RATIO = "distinct_ratio"
+# Reconcile (scherlok/reconcile.py): key values on more than one row, keys of
+# one table the other lacks, and a column's total.
+METRIC_DUPLICATE_KEYS = "duplicate_keys"
+METRIC_MISSING_KEYS = "missing_keys"
+METRIC_EXTRA_KEYS = "extra_keys"
+METRIC_SUM = "sum"
 
 CHANGE_PCT_DIGITS = 1
 
