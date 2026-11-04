@@ -9,10 +9,13 @@ from pathlib import Path
 
 import pytest
 
+from scherlok.detector.anomaly import detect_volume_anomalies
+from scherlok.detector.fields import DETAIL_FIELDS, anomaly_details
 from scherlok.runs import COMMAND_WATCH, RunRecord
 from scherlok.store import remote as store_remote
 from scherlok.store import sqlite as store_sqlite
 from scherlok.store.sqlite import (
+    ANOMALY_DETAILS_COLUMN,
     CREATE_ANOMALIES_INDEX_SQL,
     CREATE_ANOMALIES_SQL,
     CREATE_INDEX_SQL,
@@ -23,6 +26,7 @@ from scherlok.store.sqlite import (
     SCOPE_COLUMN,
     SCOPED_TABLES,
     ProfileStore,
+    _add_anomaly_details_column,
     _add_runs,
     _add_scope_columns,
     _strip_raw_distribution_values,
@@ -34,6 +38,11 @@ SCOPELESS_VERSION = MIGRATIONS.index(_add_scope_columns)
 STAGING_SCOPE = "postgresql://staging.example.com/shop"
 PRODUCTION_SCOPE = "postgresql://prod.example.com/shop"
 RUNS_TABLE = "runs"
+# A store from before anomalies gained a details column (#108): the release
+# with only the #114 migration, so every later migration runs on open.
+BEFORE_DETAILS_VERSION = SCOPELESS_VERSION
+# Wide enough that the fixed CREATED_AT stays inside the history window.
+ALL_HISTORY_DAYS = 36500
 STORE_FILENAME = "profiles.db"
 CREATED_AT = "2026-10-01T06:00:00+00:00"
 SENTINEL_TOP_VALUE = "sentinel.person@example.invalid"
@@ -127,6 +136,14 @@ def _profiles(path: Path) -> dict[str, dict]:
     finally:
         conn.close()
     return {kind: json.loads(data) for kind, data in rows}
+
+
+def _anomaly_columns(path: Path) -> list[str]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return [row[1] for row in conn.execute("PRAGMA table_info(anomalies)")]
+    finally:
+        conn.close()
 
 
 def _anomalies(path: Path) -> list[tuple]:
@@ -262,6 +279,7 @@ def test_failing_migration_rolls_back_and_keeps_the_version(tmp_path, monkeypatc
 
     assert _user_version(path) == 0
     assert _profiles(path)["distribution:salary"] == OLD_NUMERIC_PROFILE
+    assert ANOMALY_DETAILS_COLUMN not in _anomaly_columns(path)
 
 
 # ----- scope columns (#110) --------------------------------------------------
@@ -380,4 +398,57 @@ def test_runs_migration_is_safe_to_run_twice(tmp_path):
     assert _user_version(path) == LATEST_VERSION
     assert _columns(path, "anomalies").count(RUN_ID_COLUMN) == 1
     assert ProfileStore(db_path=path).get_runs() == [run.to_dict()]
+
+
+# ----- anomalies.details (#108) ---------------------------------------------
+
+
+def test_details_migration_keeps_every_anomaly_row(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=BEFORE_DETAILS_VERSION)
+    profiles_before = _profiles(path)
+    assert ANOMALY_DETAILS_COLUMN not in _anomaly_columns(path)
+
+    store = ProfileStore(db_path=path)
+    try:
+        (old_record,) = store.get_anomaly_history(days=ALL_HISTORY_DAYS)
+        new_anomaly = detect_volume_anomalies("people", {"row_count": 3}, {"row_count": 6})[0]
+        store.save_anomalies([new_anomaly])
+        records = store.get_anomaly_history(days=ALL_HISTORY_DAYS)
+    finally:
+        store.close()
+
+    assert _user_version(path) == LATEST_VERSION
+    assert _anomaly_columns(path).count(ANOMALY_DETAILS_COLUMN) == 1
+    assert _anomalies(path)[0] == ANOMALY
+    assert _profiles(path) == profiles_before
+    assert old_record["message"] == ANOMALY[3]
+    assert anomaly_details(old_record) == dict.fromkeys(DETAIL_FIELDS)
+    assert anomaly_details(records[0]) == anomaly_details(new_anomaly)
+
+
+def test_details_migration_is_safe_to_run_twice(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=BEFORE_DETAILS_VERSION)
+    _open_and_close(path)
+
+    conn = sqlite3.connect(str(path))
+    _add_anomaly_details_column(conn)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {BEFORE_DETAILS_VERSION}")
+    conn.close()
+    _open_and_close(path)
+
+    assert _anomaly_columns(path).count(ANOMALY_DETAILS_COLUMN) == 1
+    assert _anomalies(path) == [ANOMALY]
+    assert _user_version(path) == LATEST_VERSION
+
+
+def test_a_store_from_before_any_migration_gets_the_details_column(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path)
+
+    _open_and_close(path)
+
+    assert ANOMALY_DETAILS_COLUMN in _anomaly_columns(path)
     assert _anomalies(path) == [ANOMALY]

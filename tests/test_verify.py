@@ -18,6 +18,7 @@ import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
+from scherlok.detector.fields import DETAIL_FIELDS
 
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("duckdb") is None,
@@ -199,8 +200,13 @@ def test_json_is_one_object_on_stdout_and_rich_goes_to_stderr(warehouse):
     assert set(payload) == JSON_KEYS
     assert payload["fail_on"] == "critical"
     assert payload["anomaly_count"] == len(payload["anomalies"]) == 1
-    assert set(payload["anomalies"][0]) == {"table", "type", "severity", "message"}
+    assert set(payload["anomalies"][0]) == {"table", "type", "severity", "message", *DETAIL_FIELDS}
     assert payload["anomalies"][0]["severity"] == "CRITICAL"
+    assert payload["anomalies"][0]["message"] == "Row count dropped 70.0% (1,000 -> 300)"
+    assert payload["anomalies"][0]["metric"] == "row_count"
+    assert payload["anomalies"][0]["baseline"] == BASELINE_ROWS
+    assert payload["anomalies"][0]["current"] == 300
+    assert payload["anomalies"][0]["change_pct"] == -70.0
     assert "Detected Anomalies" not in result.stdout
     assert "Verify failed: 1 verified" in result.stderr
 

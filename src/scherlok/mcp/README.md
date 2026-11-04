@@ -85,7 +85,7 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 |------|------|--------------|
 | `list_tables` | — | tables visible to the connection |
 | `investigate` | `tables?` | profile tables, store the baseline |
-| `watch` | `tables?` | detect anomalies vs baseline (type/severity/message); a table with no baseline yet gets the new-table checks |
+| `watch` | `tables?` | detect anomalies vs baseline (type/severity/message plus structured fields); a table with no baseline yet gets the new-table checks |
 | `status` | — | connection (redacted), tables visible, anomalies in last 30 days |
 | `history` | `days?` | anomalies recorded in the last N days |
 | `check` | `fail_on?` | CI-style pass/fail gate (`critical` default, or `warning`) |
@@ -107,6 +107,31 @@ them.
 Baselines and history belong to the database of the configured connection,
 so pointing the server at staging never moves the production baseline, even
 when both share one profile store.
+
+Every anomaly from `watch`, `verify` and `history` carries structured fields
+next to `table`, `type`, `severity` and `message`, so the agent does not have
+to parse the sentence to learn what broke:
+
+```json
+{
+  "table": "orders",
+  "type": "volume_drop",
+  "severity": "CRITICAL",
+  "message": "Row count dropped 70.0% (1,000 -> 300)",
+  "column": null,
+  "metric": "row_count",
+  "baseline": 1000,
+  "current": 300,
+  "change_pct": -70.0,
+  "hint": "Rows were deleted or filtered out; check joins and WHERE clauses changed in this build."
+}
+```
+
+A field that does not apply is `null`. `baseline` and `current` are
+aggregates or column types, never a value read from a row; `hint` is a fixed
+sentence per anomaly type. Anomalies recorded by an older release have every
+field `null` in `history`. See the
+[field reference](https://rbmuller.github.io/scherlok/ci-cd/#structured-anomaly-fields).
 
 ## Security model
 

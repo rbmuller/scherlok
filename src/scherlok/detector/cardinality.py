@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 
 from scherlok.detector.adaptive import ADAPTIVE_SCORE_THRESHOLD, adaptive_baseline
+from scherlok.detector.anomaly_types import CARDINALITY_CHANGE
+from scherlok.detector.fields import METRIC_DISTINCT_COUNT, METRIC_DISTINCT_RATIO, make_anomaly
 from scherlok.detector.severity import Severity
 
 # Percentage thresholds for cardinality change
@@ -47,6 +49,9 @@ def detect_cardinality_anomalies(
     distribution profile) so nulling values in a unique column does not
     read as a uniqueness loss. Falls back to absolute comparison when
     volume profiles are missing or non-null row counts are zero.
+
+    ``metric`` says which was compared: ``distinct_ratio`` on the near-unique
+    path, ``distinct_count`` otherwise.
     """
     anomalies: list[dict] = []
 
@@ -74,16 +79,19 @@ def detect_cardinality_anomalies(
             if change_pct >= CARDINALITY_WARNING_PCT
             else Severity.INFO
         )
-        anomalies.append({
-            "table": table,
-            "type": "cardinality_change",
-            "message": (
+        anomalies.append(_cardinality_anomaly(
+            table,
+            column,
+            (
                 f"Column '{column}' distinct values {direction}: "
                 f"learned baseline {baseline.center:,.0f} -> {current_card:,} "
                 f"({change_pct:.0f}% change; robust score: {score:+.2f})"
             ),
-            "severity": severity,
-        })
+            severity,
+            METRIC_DISTINCT_COUNT,
+            baseline.center,
+            current_card,
+        ))
         return anomalies
 
     if stored_card == 0:
@@ -124,53 +132,68 @@ def detect_cardinality_anomalies(
                     # _RATIO_EPS keeps exact decimal boundaries (10%, 50%)
                     # from falling just under on binary floats.
                     if change_pct + _RATIO_EPS >= UNIQUE_RATIO_CRITICAL_PCT:
-                        anomalies.append({
-                            "table": table,
-                            "type": "cardinality_change",
-                            "message": (
-                                f"Column '{column}' distinct ratio {direction}: "
-                                f"{stored_ratio:.3f} -> {current_ratio:.3f} "
-                                f"({change_pct:.0f}% change)"
-                            ),
-                            "severity": Severity.CRITICAL,
-                        })
+                        ratio_severity = Severity.CRITICAL
                     elif change_pct + _RATIO_EPS >= UNIQUE_RATIO_WARNING_PCT:
-                        anomalies.append({
-                            "table": table,
-                            "type": "cardinality_change",
-                            "message": (
-                                f"Column '{column}' distinct ratio {direction}: "
-                                f"{stored_ratio:.3f} -> {current_ratio:.3f} "
-                                f"({change_pct:.0f}% change)"
-                            ),
-                            "severity": Severity.WARNING,
-                        })
+                        ratio_severity = Severity.WARNING
+                    else:
+                        return anomalies
+                    anomalies.append(_cardinality_anomaly(
+                        table,
+                        column,
+                        (
+                            f"Column '{column}' distinct ratio {direction}: "
+                            f"{stored_ratio:.3f} -> {current_ratio:.3f} "
+                            f"({change_pct:.0f}% change)"
+                        ),
+                        ratio_severity,
+                        METRIC_DISTINCT_RATIO,
+                        stored_ratio,
+                        current_ratio,
+                    ))
                     return anomalies
 
     change_pct = abs(current_card - stored_card) / stored_card * 100
     direction = "increased" if current_card > stored_card else "decreased"
 
     if change_pct >= CARDINALITY_CRITICAL_PCT:
-        anomalies.append({
-            "table": table,
-            "type": "cardinality_change",
-            "message": (
-                f"Column '{column}' distinct values {direction}: "
-                f"{stored_card:,} -> {current_card:,} "
-                f"({change_pct:.0f}% change)"
-            ),
-            "severity": Severity.CRITICAL,
-        })
+        severity = Severity.CRITICAL
     elif change_pct >= CARDINALITY_WARNING_PCT:
-        anomalies.append({
-            "table": table,
-            "type": "cardinality_change",
-            "message": (
-                f"Column '{column}' distinct values {direction}: "
-                f"{stored_card:,} -> {current_card:,} "
-                f"({change_pct:.0f}% change)"
-            ),
-            "severity": Severity.WARNING,
-        })
+        severity = Severity.WARNING
+    else:
+        return anomalies
 
+    anomalies.append(_cardinality_anomaly(
+        table,
+        column,
+        (
+            f"Column '{column}' distinct values {direction}: "
+            f"{stored_card:,} -> {current_card:,} "
+            f"({change_pct:.0f}% change)"
+        ),
+        severity,
+        METRIC_DISTINCT_COUNT,
+        stored_card,
+        current_card,
+    ))
     return anomalies
+
+
+def _cardinality_anomaly(
+    table: str,
+    column: str,
+    message: str,
+    severity: Severity,
+    metric: str,
+    baseline: float,
+    current: float,
+) -> dict:
+    return make_anomaly(
+        table,
+        CARDINALITY_CHANGE,
+        message,
+        severity,
+        column=column,
+        metric=metric,
+        baseline=baseline,
+        current=current,
+    )

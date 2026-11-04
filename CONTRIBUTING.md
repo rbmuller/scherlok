@@ -6,7 +6,7 @@ Thanks for considering a contribution. Scherlok is small, opinionated, and pragm
 
 - **Pick a [good first issue](https://github.com/rbmuller/scherlok/labels/good%20first%20issue)** — bite-sized tasks (1–2 hours) with clear acceptance criteria
 - **Add a new connector** — Postgres / BigQuery / Snowflake live in [`src/scherlok/connectors/`](src/scherlok/connectors/); each implements [`BaseConnector`](src/scherlok/connectors/base.py) (connect, list_tables, get_row_count, get_columns, get_column_stats, get_last_modified)
-- **Add a new detector** — [`src/scherlok/detector/`](src/scherlok/detector/) — a function that takes `(table, current_profile, stored_profile)` and returns anomaly dicts
+- **Add a new detector** — [`src/scherlok/detector/`](src/scherlok/detector/) — a function that takes `(table, current_profile, stored_profile)` and returns anomaly dicts built with `make_anomaly` ([`fields.py`](src/scherlok/detector/fields.py)), so they carry the structured fields; a new anomaly type goes in [`anomaly_types.py`](src/scherlok/detector/anomaly_types.py) with a one-sentence hint in [`hints.py`](src/scherlok/detector/hints.py)
 - **Improve docs** — module READMEs, examples, error messages
 - **Report bugs** — use the [bug template](https://github.com/rbmuller/scherlok/issues/new/choose); include the failing connection scheme + connector version
 

@@ -4,7 +4,9 @@ from collections.abc import Sequence
 
 from scherlok.detector.adaptive import ADAPTIVE_SCORE_THRESHOLD, adaptive_baseline
 from scherlok.detector.anomaly import z_score
-from scherlok.detector.severity import classify_distribution_shift
+from scherlok.detector.anomaly_types import DISTRIBUTION_SHIFT
+from scherlok.detector.fields import METRIC_MEAN, make_anomaly
+from scherlok.detector.severity import Severity, classify_distribution_shift
 
 
 def detect_distribution_shift(
@@ -18,7 +20,8 @@ def detect_distribution_shift(
     """Compare current column distribution against stored profile.
 
     Uses z-score on the mean shift relative to the stored stddev.
-    Returns anomalies when distribution shifts significantly.
+    Returns anomalies when distribution shifts significantly. ``baseline``
+    and ``current`` are column means, never a value read from a row.
     """
     anomalies: list[dict] = []
 
@@ -38,16 +41,18 @@ def detect_distribution_shift(
 
         severity = classify_distribution_shift(z)
         direction = "increased" if z > 0 else "decreased"
-        anomalies.append({
-            "table": table,
-            "type": "distribution_shift",
-            "message": (
+        anomalies.append(_shift_anomaly(
+            table,
+            column,
+            (
                 f"Column '{column}' mean {direction}: "
                 f"learned baseline {baseline.center:.4g} -> {current_mean:.4g} "
                 f"(robust score: {z:+.2f})"
             ),
-            "severity": severity,
-        })
+            severity,
+            baseline.center,
+            current_mean,
+        ))
         return anomalies
 
     if stored_mean is None or stored_stddev is None:
@@ -64,15 +69,37 @@ def detect_distribution_shift(
     severity = classify_distribution_shift(z)
     direction = "increased" if z > 0 else "decreased"
 
-    anomalies.append({
-        "table": table,
-        "type": "distribution_shift",
-        "message": (
+    anomalies.append(_shift_anomaly(
+        table,
+        column,
+        (
             f"Column '{column}' mean {direction}: "
             f"{stored_mean:.4g} -> {current_mean:.4g} "
             f"(z-score: {z:+.2f})"
         ),
-        "severity": severity,
-    })
+        severity,
+        stored_mean,
+        current_mean,
+    ))
 
     return anomalies
+
+
+def _shift_anomaly(
+    table: str,
+    column: str,
+    message: str,
+    severity: Severity,
+    baseline: float,
+    current: float,
+) -> dict:
+    return make_anomaly(
+        table,
+        DISTRIBUTION_SHIFT,
+        message,
+        severity,
+        column=column,
+        metric=METRIC_MEAN,
+        baseline=baseline,
+        current=current,
+    )

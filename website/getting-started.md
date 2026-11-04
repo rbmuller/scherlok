@@ -91,7 +91,7 @@ Records saved before scopes existed have none and keep counting for every connec
 | Schema | column names, types, nullability |
 | Freshness | the table's last-modified time as the warehouse reports it, hours since then |
 | Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
-| Anomaly history | table, anomaly type, severity, message, detection time, id of the run that found it |
+| Anomaly history | table, anomaly type, severity, message, detection time, id of the run that found it; the column involved, the metric with its baseline and current values (aggregates or column types), the change in percent and a fixed hint |
 | Runs | command, Scherlok version, names of the tables checked, `--fail-on`, passed or failed, anomaly count per severity, start and end time |
 | Scope, on every profile, anomaly and run | adapter, host, port and path of the connection, never credentials |
 

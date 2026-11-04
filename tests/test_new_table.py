@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
+from scherlok.detector.hints import ANOMALY_HINTS
 from scherlok.detector.new_table import (
     ALL_NULL_COLUMN,
     CONSTANT_COLUMN,
@@ -81,6 +82,12 @@ def test_empty_table_fires_as_warning_and_skips_column_checks():
         "type": EMPTY_TABLE,
         "message": "New table is empty (0 rows)",
         "severity": Severity.WARNING,
+        "column": None,
+        "metric": "row_count",
+        "baseline": None,
+        "current": 0,
+        "change_pct": None,
+        "hint": ANOMALY_HINTS[EMPTY_TABLE],
     }]
 
 

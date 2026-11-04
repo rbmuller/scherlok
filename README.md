@@ -163,7 +163,7 @@ scherlok verify --output json                       # one JSON object on stdout
 scherlok verify --record scherlok-runs.jsonl        # append the run record, e.g. a CI artifact
 ```
 
-Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. Those you name with `--table` count as just built: an empty table, a column NULL in every row or a duplicate key there is CRITICAL, so an agent can gate on a table it just created. Every `watch`, `ci`, `check` and `verify` run is recorded, passing or not: `scherlok history --runs` lists them. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
+Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. Those you name with `--table` count as just built: an empty table, a column NULL in every row or a duplicate key there is CRITICAL, so an agent can gate on a table it just created. Every `watch`, `ci`, `check` and `verify` run is recorded, passing or not: `scherlok history --runs` lists them. Every anomaly in the JSON also carries `column`, `metric`, `baseline`, `current`, `change_pct` and a fixed `hint`, so it can be acted on without parsing the message. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
 
 ## Works with dbt
 
