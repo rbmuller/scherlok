@@ -10,7 +10,7 @@ Scherlok fails the pipeline when data breaks, before the deploy reaches producti
 scherlok ci "$DATABASE_URL" --webhook "$SLACK_WEBHOOK" --fail-on critical
 ```
 
-- First run: profiles everything, exits 0 (nothing to compare against yet).
+- First run: profiles everything and runs the new-table checks, since there is nothing to compare against yet: an empty table, a column NULL in every row or duplicates in `id` / `<singular table>_id` (WARNING), one value in 100+ non-NULL rows (INFO). With the default `--fail-on critical` it exits 0 and shows them; `--fail-on warning` fails on them.
 - Later runs: compares against the stored baseline, exits 1 on any CRITICAL anomaly (`--fail-on warning` to be stricter).
 - Baselines must survive between runs: point `scherlok config --store` at an S3, GCS or Azure Blob path so each runner syncs the same profiles file.
 
@@ -29,7 +29,7 @@ scherlok verify --output json                     # one JSON object on stdout
 
 - **Writes nothing.** No profiles, no anomalies and no config. The connection comes from `SCHERLOK_CONNECTION` or a previous `scherlok connect` and is never saved.
 - **Never uploads a remote store.** With `--store` or `SCHERLOK_STORE` set, the store is downloaded and never uploaded back, so parallel jobs running `verify` can't overwrite each other or a concurrent `ci` run.
-- **Tables without a baseline** are listed under `tables_without_baseline` and never counted as verified. They don't fail the gate on their own; run `scherlok investigate` (or let a scheduled `watch` run) to give them one.
+- **Tables without a baseline** are listed under `tables_without_baseline` and never counted as verified. They get only the new-table checks, as WARNING (INFO for a constant column). Tables you name with `--table` count as just built, so an empty table, a column NULL in every row or a duplicate key there is CRITICAL and fails the default gate: `scherlok verify --table new_orders` right after creating it. Once the data is right, run `scherlok investigate` (or let a scheduled `watch` run) to give them a baseline.
 - **Exit code:** 1 when an anomaly reaches `--fail-on` (`critical` by default), or on an error such as a missing connection, an unknown `--table` or an invalid flag; 0 otherwise.
 
 Keep the baseline learning elsewhere, for example `scherlok watch --schedule` or `scherlok ci` on your main branch, and gate changes with `verify`:

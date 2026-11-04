@@ -91,6 +91,10 @@ baseline schema.
 deviations from baseline.
 - cardinality_change: a column's distinct-value count changed sharply \
 (e.g. an enum column exploded).
+- empty_table / all_null_column / duplicate_key / constant_column: a table \
+seen for the first time, with no baseline yet, has no rows, a column that is \
+NULL in every row, duplicates in its own key column (`id` or \
+`<singular table>_id`), or a column with a single value in 100+ non-NULL rows.
 
 Your job: give the on-call engineer a head start, not a lecture.
 - Correlate across the batch. Multiple anomalies frequently share one \

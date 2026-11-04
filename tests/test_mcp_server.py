@@ -107,11 +107,31 @@ def test_investigate_unknown_table_raises(wired):
 # ----- watch ----------------------------------------------------------------
 
 def test_watch_first_run_no_anomalies(wired):
-    # First sighting establishes the baseline — nothing to compare against yet.
+    # First sighting establishes the baseline, and nothing in these clean
+    # tables trips the new-table checks.
     out = wired.watch()
     assert out["anomaly_count"] == 0
     assert out["critical"] == 0
     assert out["tables_watched"] == 2
+
+
+def test_watch_reports_a_new_empty_table_as_a_warning(wired, duck_connector):
+    duck_connector._conn.execute("CREATE TABLE refunds (id INTEGER)")
+
+    out = wired.watch(tables=["refunds"])
+
+    assert out["warning"] == 1 and out["critical"] == 0
+    assert out["anomalies"][0]["type"] == "empty_table"
+    assert out["anomalies"][0]["severity"] == "WARNING"
+
+
+def test_investigate_profiles_a_new_empty_table_silently(wired, duck_connector):
+    duck_connector._conn.execute("CREATE TABLE refunds (id INTEGER)")
+
+    out = wired.investigate(tables=["refunds"])
+
+    assert out == {"profiled": 1, "tables": [{"table": "refunds", "row_count": 0}]}
+    assert wired.history(days=1)["count"] == 0
 
 
 def test_watch_detects_volume_drop_end_to_end(wired, duck_connector):
@@ -230,6 +250,19 @@ def test_verify_lists_tables_without_baseline_apart(wired):
     assert out["tables_verified"] == ["orders"]
     assert out["tables_without_baseline"] == ["users"]
     assert out["truncated"] is False
+
+
+def test_verify_fails_on_a_named_new_empty_table(wired, duck_connector):
+    duck_connector._conn.execute("CREATE TABLE refunds (id INTEGER)")
+
+    named = wired.verify(tables=["refunds"])
+    unnamed = wired.verify()
+
+    assert named["passed"] is False
+    assert named["anomalies"][0]["type"] == "empty_table"
+    assert named["anomalies"][0]["severity"] == "CRITICAL"
+    assert unnamed["passed"] is True
+    assert unnamed["warning"] == 1
 
 
 def test_verify_payload_shape(wired):
