@@ -49,6 +49,7 @@ from scherlok.profiler.volume import profile_volume
 from scherlok.service import (
     UnknownTablesError,
     VerificationResult,
+    connection_scope,
     profile_and_detect,
     severity_counts,
     verify_tables,
@@ -116,6 +117,15 @@ def _get_connector_or_exit() -> object:
         _print_connect_failure(connector)
         raise typer.Exit(code=1)
     return connector
+
+
+def _open_store(connection_string: str | None) -> ProfileStore:
+    """Open the local profile store for the database a connection points at.
+
+    Baselines are kept per database, so the same table name on two
+    connections never shares one; see `service.connection_scope`.
+    """
+    return ProfileStore(scope=connection_scope(connection_string))
 
 
 def _fail_on_or_exit(fail_on: str) -> str:
@@ -225,7 +235,7 @@ def investigate() -> None:
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
-        store = ProfileStore()
+        store = _open_store(connector.connection_string)
         tables = connector.list_tables()
 
         if not tables:
@@ -396,7 +406,7 @@ def _run_watch(
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
-        store = ProfileStore()
+        store = _open_store(connector.connection_string)
         if tables is None:
             tables = connector.list_tables()
         all_anomalies: list[dict] = []
@@ -582,7 +592,7 @@ def _run_verify(tables: list[str] | None, fail_on: str) -> VerificationResult:
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB, upload_on_exit=False):
-        store = ProfileStore()
+        store = _open_store(connector.connection_string)
         try:
             return verify_tables(connector, store, tables, fail_on)
         except UnknownTablesError as exc:
@@ -933,7 +943,7 @@ def _dbt_impl(
     json_models: list[dict] = []
     explain_lineage: dict[str, list[str]] = {}
     with sync_context(cfg.get_store(), PROFILES_DB):
-        store = ProfileStore()
+        store = _open_store(conn_str)
         for node, physical in matched:
             table_anomalies, current_vol = _watch_table(connector, store, physical)
             # Enrich each anomaly's message with downstream-impact info so the
@@ -1404,7 +1414,7 @@ def dashboard(
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
-        store = ProfileStore()
+        store = _open_store(conn_str)
         try:
             html = render_dashboard(
                 store,
@@ -1470,8 +1480,8 @@ def report(
         set_verbosity(quiet=True)
 
     try:
-        store = ProfileStore()
         connector = _get_connector_or_exit()
+        store = _open_store(connector.connection_string)
         tables = connector.list_tables()
 
         if not tables:
@@ -1593,8 +1603,8 @@ def status(
         set_verbosity(quiet=True)
 
     try:
-        store = ProfileStore()
         connector = _get_connector_or_exit()
+        store = _open_store(connector.connection_string)
         tables = connector.list_tables()
 
         records: list[dict] = []
@@ -1666,7 +1676,8 @@ def history(
         raise typer.Exit(code=1)
     json_mode = output_lower == "json"
 
-    store = ProfileStore()
+    # Scoped to the configured connection, which is read but never opened.
+    store = _open_store(ScherlokConfig.load().get_connection_string())
     records = store.get_anomaly_history(days=days)
 
     if json_mode:

@@ -14,6 +14,14 @@ PROFILES_DB = SCHERLOK_DIR / "profiles.db"
 DISTRIBUTION_PROFILE_PREFIX = "distribution:"
 RAW_VALUE_KEYS = ("top_values", "min", "max")
 
+SCOPE_COLUMN = "scope"
+SCOPED_TABLES = ("profiles", "anomalies")
+# Limits a read to the store's scope plus the unscoped rows older releases
+# wrote; a store opened without a scope reads every row. Takes the scope twice.
+SCOPE_FILTER_SQL = f"(? IS NULL OR {SCOPE_COLUMN} IS NULL OR {SCOPE_COLUMN} = ?)"
+
+# The base schema, as the first release wrote it. Never edit it: later columns
+# and tables come from MIGRATIONS, so a store of any age ends up the same.
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,25 +72,60 @@ def _strip_raw_distribution_values(conn: sqlite3.Connection) -> None:
         )
 
 
+def _add_column(conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+    """Add a column unless the table already has it, so a migration can run twice."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
+def _add_scope_columns(conn: sqlite3.Connection) -> None:
+    """Record which database each profile and anomaly came from (#110).
+
+    Rows already in the store keep a NULL scope, which matches every
+    connection, so an upgrade keeps the history it had.
+    """
+    for table in SCOPED_TABLES:
+        _add_column(conn, table, SCOPE_COLUMN, "TEXT")
+
+
 # Ordered store migrations. PRAGMA user_version records how many a store has
 # applied, so add a migration by appending a function that takes the
 # connection; never reorder or remove one. Every migration must be idempotent:
 # it also runs on brand-new stores, and runs again if a later step fails.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _strip_raw_distribution_values,  # user_version 1
+    _add_scope_columns,  # user_version 2
 )
 
 
 class ProfileStore:
-    """SQLite-backed storage for data profiles."""
+    """SQLite-backed storage for data profiles.
 
-    def __init__(self, db_path: Path | None = None) -> None:
+    ``scope`` names the database the profiles come from (see
+    ``service.connection_scope``), so two databases with an ``orders`` table
+    keep separate baselines in one store. Saves are tagged with it, and reads
+    see the rows of that scope plus the unscoped rows older releases wrote.
+    Without a scope, saves are unscoped and reads see every row.
+    """
+
+    def __init__(self, db_path: Path | None = None, *, scope: str | None = None) -> None:
         self._db_path = db_path or PROFILES_DB
+        self._scope = scope
         make_private_dir(self._db_path.parent)
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._init_db()
         self._migrate()
+
+    @property
+    def scope(self) -> str | None:
+        """The database this store reads and writes for, or None for every one."""
+        return self._scope
+
+    def _scope_params(self) -> tuple[str | None, str | None]:
+        """Parameters for one SCOPE_FILTER_SQL."""
+        return self._scope, self._scope
 
     def _init_db(self) -> None:
         """Create tables and indexes if they don't exist."""
@@ -115,13 +158,14 @@ class ProfileStore:
     def save_profile(self, table_name: str, profile_type: str, data: dict) -> None:
         """Save a profile snapshot to the store."""
         self._conn.execute(
-            "INSERT INTO profiles (table_name, profile_type, data, created_at) "
-            "VALUES (?, ?, ?, ?)",
+            f"INSERT INTO profiles (table_name, profile_type, data, created_at, {SCOPE_COLUMN}) "
+            "VALUES (?, ?, ?, ?, ?)",
             (
                 table_name,
                 profile_type,
                 json.dumps(data, default=str),
                 datetime.now(timezone.utc).isoformat(),
+                self._scope,
             ),
         )
         self._conn.commit()
@@ -130,9 +174,9 @@ class ProfileStore:
         """Get the most recent profile for a table and type."""
         row = self._conn.execute(
             "SELECT data FROM profiles "
-            "WHERE table_name = ? AND profile_type = ? "
+            f"WHERE table_name = ? AND profile_type = ? AND {SCOPE_FILTER_SQL} "
             "ORDER BY created_at DESC LIMIT 1",
-            (table_name, profile_type),
+            (table_name, profile_type, *self._scope_params()),
         ).fetchone()
         if row:
             return json.loads(row["data"])
@@ -149,9 +193,9 @@ class ProfileStore:
         """Get historical profiles, optionally bounded to the latest rows."""
         query = (
             "SELECT data, created_at FROM profiles "
-            "WHERE table_name = ? AND profile_type = ?"
+            f"WHERE table_name = ? AND profile_type = ? AND {SCOPE_FILTER_SQL}"
         )
-        params: list[Any] = [table_name, profile_type]
+        params: list[Any] = [table_name, profile_type, *self._scope_params()]
         if days is not None:
             cutoff = datetime.now(timezone.utc).isoformat()
             query += " AND created_at >= datetime(?, '-' || ? || ' days')"
@@ -172,9 +216,10 @@ class ProfileStore:
         now = datetime.now(timezone.utc).isoformat()
         for a in anomalies:
             self._conn.execute(
-                "INSERT INTO anomalies (table_name, anomaly_type, severity, message, detected_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (a["table"], a["type"], a["severity"].value, a["message"], now),
+                "INSERT INTO anomalies "
+                f"(table_name, anomaly_type, severity, message, detected_at, {SCOPE_COLUMN}) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (a["table"], a["type"], a["severity"].value, a["message"], now, self._scope),
             )
         self._conn.commit()
 
@@ -184,9 +229,9 @@ class ProfileStore:
         rows = self._conn.execute(
             "SELECT table_name, anomaly_type, severity, message, detected_at "
             "FROM anomalies "
-            "WHERE detected_at >= datetime(?, '-' || ? || ' days') "
+            f"WHERE detected_at >= datetime(?, '-' || ? || ' days') AND {SCOPE_FILTER_SQL} "
             "ORDER BY detected_at DESC",
-            (cutoff, days),
+            (cutoff, days, *self._scope_params()),
         ).fetchall()
         return [
             {
@@ -210,8 +255,9 @@ class ProfileStore:
             "SELECT table_name, anomaly_type, severity, detected_at FROM ("
             "SELECT table_name, anomaly_type, severity, detected_at, "
             "ROW_NUMBER() OVER (PARTITION BY table_name "
-            "ORDER BY detected_at DESC, id DESC) AS rn FROM anomalies"
+            f"ORDER BY detected_at DESC, id DESC) AS rn FROM anomalies WHERE {SCOPE_FILTER_SQL}"
             ") WHERE rn = 1",
+            self._scope_params(),
         ).fetchall()
         return {
             row["table_name"]: {

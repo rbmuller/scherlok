@@ -375,6 +375,8 @@ scherlok config --store gs://my-bucket/scherlok/profiles.db
 scherlok config --store az://my-container/scherlok/profiles.db
 ```
 
+One store can hold several databases: baselines are kept per database (adapter, host, port and path of the connection, never credentials), so `orders` in staging never shares a baseline with `orders` in production. 📖 [Where things live →](https://rbmuller.github.io/scherlok/getting-started/#where-things-live)
+
 ## How it compares
 
 | | **Scherlok** | Elementary | Soda | Great Expectations | Monte Carlo |

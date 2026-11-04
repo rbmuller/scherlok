@@ -39,6 +39,12 @@ ANOMALIES_KEY = "anomalies"
 TABLES_VERIFIED_KEY = "tables_verified"
 TABLES_WITHOUT_BASELINE_KEY = "tables_without_baseline"
 
+# Spellings of one adapter that must share a scope.
+SCOPE_SCHEME_ALIASES = {"postgres": "postgresql"}
+# A port equal to the adapter's default is left out of the scope, so
+# `host/db` and `host:5432/db` (as `scherlok dbt` writes it) are one database.
+SCOPE_DEFAULT_PORTS = {"postgresql": 5432, "mysql": 3306}
+
 
 class UnknownTablesError(ValueError):
     """Raised when requested tables are not visible on the connection."""
@@ -235,6 +241,41 @@ def redact_connection(connection_string: str) -> str:
     return urlunsplit(
         (parts.scheme, f"{userinfo}@{host}", parts.path, parts.query, parts.fragment)
     )
+
+
+def connection_scope(connection_string: str | None) -> str | None:
+    """Name the database a connection points at, so its baselines stay apart.
+
+    Built only from the adapter, host, port and path (database, schema,
+    dataset or DuckDB file). The user, password, query string and fragment,
+    where tokens and keys travel, are never copied. The adapter and host are
+    lower-cased, ``postgres`` becomes ``postgresql`` and a default port is
+    dropped, so spellings of one database share a scope:
+    ``postgresql://alice:secret@DB.example.com:5432/shop?sslmode=require``
+    -> ``postgresql://db.example.com/shop``.
+
+    Returns None, unscoped as before scopes existed, when the string is not a
+    URL or when an ``@`` follows the host. A password holding an unencoded
+    ``/``, ``?`` or ``#`` ends the host early and leaves the rest of the
+    password after it, so the parsed host can't be trusted to hold no secret.
+    """
+    if not connection_string or "://" not in connection_string:
+        return None
+    parts = urlsplit(connection_string)
+    if parts.netloc and any("@" in piece for piece in (parts.path, parts.query, parts.fragment)):
+        return None
+    try:
+        port = parts.port
+    except ValueError:  # not a number, so the host was cut short too
+        return None
+    scheme = parts.scheme.lower()
+    scheme = SCOPE_SCHEME_ALIASES.get(scheme, scheme)
+    host = parts.hostname or ""
+    if ":" in host:  # an IPv6 literal keeps its brackets
+        host = f"[{host}]"
+    if port is not None and port != SCOPE_DEFAULT_PORTS.get(scheme):
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}{parts.path.rstrip('/')}"
 
 
 def anomaly_to_dict(anomaly: dict) -> dict[str, Any]:

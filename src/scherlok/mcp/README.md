@@ -100,6 +100,10 @@ name it in `verify(tables=[...])` and an empty table, a column NULL in every
 row or a duplicate key in `id` / `<singular table>_id` fails the gate as
 CRITICAL.
 
+Baselines and history belong to the database of the configured connection,
+so pointing the server at staging never moves the production baseline, even
+when both share one profile store.
+
 ## Security model
 
 - **Credentials never reach the model.** The connection string is read

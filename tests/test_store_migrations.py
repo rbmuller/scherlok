@@ -18,11 +18,18 @@ from scherlok.store.sqlite import (
     CREATE_TABLE_SQL,
     MIGRATIONS,
     RAW_VALUE_KEYS,
+    SCOPE_COLUMN,
+    SCOPED_TABLES,
     ProfileStore,
+    _add_scope_columns,
     _strip_raw_distribution_values,
 )
 
 LATEST_VERSION = len(MIGRATIONS)
+# What the release with only the #114 migration leaves behind.
+SCOPELESS_VERSION = MIGRATIONS.index(_add_scope_columns)
+STAGING_SCOPE = "postgresql://staging.example.com/shop"
+PRODUCTION_SCOPE = "postgresql://prod.example.com/shop"
 STORE_FILENAME = "profiles.db"
 CREATED_AT = "2026-10-01T06:00:00+00:00"
 SENTINEL_TOP_VALUE = "sentinel.person@example.invalid"
@@ -216,9 +223,19 @@ def test_migration_is_safe_to_run_twice(tmp_path):
 
 
 def test_store_from_a_newer_release_is_left_alone(tmp_path):
+    # A newer release has every column this one knows, plus some it doesn't,
+    # and data this release's migrations would rewrite.
     path = tmp_path / STORE_FILENAME
     newer_version = LATEST_VERSION + 5
-    _create_old_store(path, user_version=newer_version)
+    _open_and_close(path)
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "INSERT INTO profiles (table_name, profile_type, data, created_at) VALUES (?, ?, ?, ?)",
+        ("people", "distribution:salary", json.dumps(OLD_NUMERIC_PROFILE), CREATED_AT),
+    )
+    conn.execute(f"PRAGMA user_version = {newer_version}")
+    conn.commit()
+    conn.close()
 
     store = ProfileStore(db_path=path)
     store.save_profile("people", "volume", VOLUME_PROFILE)
@@ -241,3 +258,72 @@ def test_failing_migration_rolls_back_and_keeps_the_version(tmp_path, monkeypatc
 
     assert _user_version(path) == 0
     assert _profiles(path)["distribution:salary"] == OLD_NUMERIC_PROFILE
+
+
+# ----- scope columns (#110) --------------------------------------------------
+
+def _columns(path: Path, table: str) -> list[str]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+    finally:
+        conn.close()
+
+
+def _scopes(path: Path, table: str) -> list[str | None]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return [row[0] for row in conn.execute(f"SELECT {SCOPE_COLUMN} FROM {table}")]
+    finally:
+        conn.close()
+
+
+def test_store_from_the_previous_release_gains_scope_and_keeps_its_rows(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=SCOPELESS_VERSION)
+    rows_before = _profile_rows(path)
+    profiles_before = _profiles(path)
+
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    for table in SCOPED_TABLES:
+        assert SCOPE_COLUMN in _columns(path, table)
+        assert set(_scopes(path, table)) == {None}
+    assert _profile_rows(path) == rows_before
+    assert _profiles(path) == profiles_before  # only the pending migration ran
+    assert _anomalies(path) == [ANOMALY]
+
+
+def test_unscoped_rows_from_before_the_upgrade_match_every_connection(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=SCOPELESS_VERSION)
+
+    for scope in (STAGING_SCOPE, PRODUCTION_SCOPE, None):
+        store = ProfileStore(db_path=path, scope=scope)
+        assert store.get_latest_profile("people", "volume") == VOLUME_PROFILE
+        assert store.get_latest_anomaly_per_table()["people"]["type"] == ANOMALY[1]
+        store.close()
+
+
+def test_scope_migration_is_safe_to_run_twice(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=SCOPELESS_VERSION)
+    _open_and_close(path)
+    store = ProfileStore(db_path=path, scope=STAGING_SCOPE)
+    store.save_profile("people", "volume", {"row_count": 9})
+    store.close()
+    rows_after_first = _profile_rows(path)
+
+    conn = sqlite3.connect(str(path))
+    _add_scope_columns(conn)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {SCOPELESS_VERSION}")
+    conn.close()
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    for table in SCOPED_TABLES:
+        assert _columns(path, table).count(SCOPE_COLUMN) == 1
+    assert _profile_rows(path) == rows_after_first
+    assert _scopes(path, "profiles").count(STAGING_SCOPE) == 1

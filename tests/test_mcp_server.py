@@ -173,6 +173,20 @@ def test_history_reads_store(wired, duck_connector):
     assert all("severity" in a for a in out["anomalies"])
 
 
+def test_tools_keep_each_connection_apart(wired, duck_connector, monkeypatch):
+    wired.investigate(tables=["orders"])
+    duck_connector._conn.execute("DELETE FROM orders WHERE id > 1")
+    assert wired.watch(tables=["orders"])["critical"] >= 1
+
+    # Same table name, another database: no baseline and no history of its own.
+    other = "duckdb:///other.duckdb"
+    monkeypatch.setattr(duck_connector, "connection_string", other)
+    monkeypatch.setenv("SCHERLOK_CONNECTION", other)
+
+    assert wired.history()["count"] == 0
+    assert wired.verify(tables=["orders"])["tables_without_baseline"] == ["orders"]
+
+
 # ----- check ----------------------------------------------------------------
 
 def test_check_passes_when_clean(wired):
