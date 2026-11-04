@@ -39,4 +39,4 @@ Exit 1 when an anomaly at or above the chosen severity fired; see [CI/CD gate](c
 
 ## Alert history
 
-Every fired anomaly is persisted next to the profiles. `scherlok history --days 30` lists them; the [HTML dashboard](dashboard.md) groups them per table.
+Every fired anomaly is persisted next to the profiles, with the id of the run that found it. `scherlok history --days 30` lists them; the [HTML dashboard](dashboard.md) groups them per table. `scherlok history --runs` lists the runs themselves, including those that found nothing; see [Run records](ci-cd.md#run-records).

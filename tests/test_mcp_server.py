@@ -304,6 +304,37 @@ def test_verify_caps_anomalies(wired, duck_connector, monkeypatch):
     assert out["truncated"] is True
 
 
+def test_watch_check_and_verify_record_one_run_each(wired, duck_connector, tmp_path):
+    from scherlok.store.sqlite import ProfileStore
+
+    wired.watch()  # first sighting: no anomalies, still a run
+    duck_connector._conn.execute("DELETE FROM orders WHERE id > 1")
+    wired.verify(fail_on="warning")
+    wired.check()
+
+    runs = ProfileStore(db_path=tmp_path / "profiles.db").get_runs()
+    assert [(r["command"], r["fail_on"], r["passed"]) for r in runs] == [
+        ("mcp:check", "critical", False),
+        ("mcp:verify", "warning", False),
+        ("mcp:watch", "critical", True),
+    ]
+    assert runs[2]["tables"] == ["orders", "users"]
+    check_run_id = runs[0]["run_id"]
+    assert {row[0] for row in _store_rows(tmp_path, "SELECT run_id FROM anomalies")} == {
+        check_run_id
+    }
+
+
+def _store_rows(tmp_path, sql: str) -> list[tuple]:
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / "profiles.db")
+    try:
+        return conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+
+
 def test_verify_unknown_table_raises(wired):
     with pytest.raises(ValueError, match="not found"):
         wired.verify(tables=["ghost"])

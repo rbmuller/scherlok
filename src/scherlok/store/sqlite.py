@@ -53,6 +53,47 @@ CREATE INDEX IF NOT EXISTS idx_anomalies_lookup
 ON anomalies (table_name, detected_at DESC)
 """
 
+RUN_ID_COLUMN = "run_id"
+RUN_TABLES_KEY = "tables"
+RUN_PASSED_KEY = "passed"
+# One row per run (#115), in the order `scherlok history --runs --output json`
+# and `scherlok verify --record` print them. `tables` holds a JSON list.
+RUN_COLUMNS = (
+    RUN_ID_COLUMN,
+    "command",
+    SCOPE_COLUMN,
+    "scherlok_version",
+    RUN_TABLES_KEY,
+    RUN_PASSED_KEY,
+    "fail_on",
+    "critical",
+    "warning",
+    "info",
+    "started_at",
+    "finished_at",
+)
+
+CREATE_RUNS_SQL = """
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    command TEXT NOT NULL,
+    scope TEXT,
+    scherlok_version TEXT NOT NULL,
+    tables TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    fail_on TEXT NOT NULL,
+    critical INTEGER NOT NULL,
+    warning INTEGER NOT NULL,
+    info INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL
+)
+"""
+
+CREATE_RUNS_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_runs_started ON runs (started_at DESC)
+"""
+
 
 def _strip_raw_distribution_values(conn: sqlite3.Connection) -> None:
     """Drop the column values older releases kept in distribution profiles (#114)."""
@@ -89,6 +130,16 @@ def _add_scope_columns(conn: sqlite3.Connection) -> None:
         _add_column(conn, table, SCOPE_COLUMN, "TEXT")
 
 
+def _add_runs(conn: sqlite3.Connection) -> None:
+    """Record every run, passing or not, and the run each anomaly came from (#115).
+
+    Anomalies already in the store keep a NULL run_id: no run recorded them.
+    """
+    conn.execute(CREATE_RUNS_SQL)
+    conn.execute(CREATE_RUNS_INDEX_SQL)
+    _add_column(conn, "anomalies", RUN_ID_COLUMN, "TEXT")
+
+
 # Ordered store migrations. PRAGMA user_version records how many a store has
 # applied, so add a migration by appending a function that takes the
 # connection; never reorder or remove one. Every migration must be idempotent:
@@ -96,6 +147,7 @@ def _add_scope_columns(conn: sqlite3.Connection) -> None:
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _strip_raw_distribution_values,  # user_version 1
     _add_scope_columns,  # user_version 2
+    _add_runs,  # user_version 3
 )
 
 
@@ -211,15 +263,22 @@ class ProfileStore:
             for row in rows
         ]
 
-    def save_anomalies(self, anomalies: list[dict]) -> None:
-        """Save detected anomalies to history."""
+    def save_anomalies(self, anomalies: list[dict], run_id: str | None = None) -> None:
+        """Save detected anomalies to history, tagged with the run that found them."""
         now = datetime.now(timezone.utc).isoformat()
         for a in anomalies:
             self._conn.execute(
-                "INSERT INTO anomalies "
-                f"(table_name, anomaly_type, severity, message, detected_at, {SCOPE_COLUMN}) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (a["table"], a["type"], a["severity"].value, a["message"], now, self._scope),
+                "INSERT INTO anomalies (table_name, anomaly_type, severity, message, "
+                f"detected_at, {SCOPE_COLUMN}, {RUN_ID_COLUMN}) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    a["table"],
+                    a["type"],
+                    a["severity"].value,
+                    a["message"],
+                    now,
+                    self._scope,
+                    run_id,
+                ),
             )
         self._conn.commit()
 
@@ -227,7 +286,7 @@ class ProfileStore:
         """Get anomaly history for the last N days."""
         cutoff = datetime.now(timezone.utc).isoformat()
         rows = self._conn.execute(
-            "SELECT table_name, anomaly_type, severity, message, detected_at "
+            f"SELECT table_name, anomaly_type, severity, message, detected_at, {RUN_ID_COLUMN} "
             "FROM anomalies "
             f"WHERE detected_at >= datetime(?, '-' || ? || ' days') AND {SCOPE_FILTER_SQL} "
             "ORDER BY detected_at DESC",
@@ -240,6 +299,35 @@ class ProfileStore:
                 "severity": row["severity"],
                 "message": row["message"],
                 "detected_at": row["detected_at"],
+                RUN_ID_COLUMN: row[RUN_ID_COLUMN],
+            }
+            for row in rows
+        ]
+
+    def save_run(self, record: dict[str, Any]) -> None:
+        """Save one run record, keyed like RUN_COLUMNS (see `scherlok.runs`)."""
+        row = {**record, RUN_TABLES_KEY: json.dumps(record[RUN_TABLES_KEY])}
+        placeholders = ", ".join("?" for _ in RUN_COLUMNS)
+        self._conn.execute(
+            f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({placeholders})",
+            [row[column] for column in RUN_COLUMNS],
+        )
+        self._conn.commit()
+
+    def get_runs(self, days: int = 30) -> list[dict[str, Any]]:
+        """Runs started in the last N days, newest first, as save_run took them."""
+        cutoff = datetime.now(timezone.utc).isoformat()
+        rows = self._conn.execute(
+            f"SELECT {', '.join(RUN_COLUMNS)} FROM runs "
+            f"WHERE started_at >= datetime(?, '-' || ? || ' days') AND {SCOPE_FILTER_SQL} "
+            "ORDER BY started_at DESC",
+            (cutoff, days, *self._scope_params()),
+        ).fetchall()
+        return [
+            {
+                **dict(row),
+                RUN_TABLES_KEY: json.loads(row[RUN_TABLES_KEY]),
+                RUN_PASSED_KEY: bool(row[RUN_PASSED_KEY]),
             }
             for row in rows
         ]

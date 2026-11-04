@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from scherlok.runs import COMMAND_WATCH, RunRecord
 from scherlok.store import remote as store_remote
 from scherlok.store import sqlite as store_sqlite
 from scherlok.store.sqlite import (
@@ -18,9 +19,11 @@ from scherlok.store.sqlite import (
     CREATE_TABLE_SQL,
     MIGRATIONS,
     RAW_VALUE_KEYS,
+    RUN_ID_COLUMN,
     SCOPE_COLUMN,
     SCOPED_TABLES,
     ProfileStore,
+    _add_runs,
     _add_scope_columns,
     _strip_raw_distribution_values,
 )
@@ -30,6 +33,7 @@ LATEST_VERSION = len(MIGRATIONS)
 SCOPELESS_VERSION = MIGRATIONS.index(_add_scope_columns)
 STAGING_SCOPE = "postgresql://staging.example.com/shop"
 PRODUCTION_SCOPE = "postgresql://prod.example.com/shop"
+RUNS_TABLE = "runs"
 STORE_FILENAME = "profiles.db"
 CREATED_AT = "2026-10-01T06:00:00+00:00"
 SENTINEL_TOP_VALUE = "sentinel.person@example.invalid"
@@ -327,3 +331,53 @@ def test_scope_migration_is_safe_to_run_twice(tmp_path):
         assert _columns(path, table).count(SCOPE_COLUMN) == 1
     assert _profile_rows(path) == rows_after_first
     assert _scopes(path, "profiles").count(STAGING_SCOPE) == 1
+
+
+# ----- runs table and anomalies.run_id (#115) --------------------------------
+
+def _tables(path: Path) -> set[str]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
+
+
+def test_store_from_the_previous_release_gains_runs_and_keeps_its_rows(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=SCOPELESS_VERSION)
+    rows_before = _profile_rows(path)
+
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    assert RUNS_TABLE in _tables(path)
+    assert RUN_ID_COLUMN in _columns(path, "anomalies")
+    assert _profile_rows(path) == rows_before
+    assert _anomalies(path) == [ANOMALY]
+    conn = sqlite3.connect(str(path))
+    try:
+        assert conn.execute(f"SELECT {RUN_ID_COLUMN} FROM anomalies").fetchall() == [(None,)]
+    finally:
+        conn.close()
+
+
+def test_runs_migration_is_safe_to_run_twice(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_old_store(path, user_version=SCOPELESS_VERSION)
+    store = ProfileStore(db_path=path, scope=STAGING_SCOPE)
+    run = RunRecord(command=COMMAND_WATCH, scope=STAGING_SCOPE).finish(["people"], [])
+    store.save_run(run.to_dict())
+    store.close()
+
+    conn = sqlite3.connect(str(path))
+    _add_runs(conn)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {SCOPELESS_VERSION}")
+    conn.close()
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    assert _columns(path, "anomalies").count(RUN_ID_COLUMN) == 1
+    assert ProfileStore(db_path=path).get_runs() == [run.to_dict()]
+    assert _anomalies(path) == [ANOMALY]

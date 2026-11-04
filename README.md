@@ -155,14 +155,15 @@ Use Scherlok as a data quality gate. The `ci` command does it in one line:
 
 If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
 
-`ci` saves every run, so after a failure the broken state becomes the baseline and a retry passes. When a retry must keep failing until the data is fixed, as with an AI agent or a CI job that retries, gate with `verify`. It compares against the stored baseline and saves nothing: no profiles, no anomalies, no config, and it never uploads a remote store.
+`ci` saves every run, so after a failure the broken state becomes the baseline and a retry passes. When a retry must keep failing until the data is fixed, as with an AI agent or a CI job that retries, gate with `verify`. It compares against the stored baseline and saves no profiles, no anomalies and no config, and it never uploads a remote store; it only records the run.
 
 ```bash
 scherlok verify --table orders --fail-on critical   # exit 1 while orders is still broken
 scherlok verify --output json                       # one JSON object on stdout
+scherlok verify --record scherlok-runs.jsonl        # append the run record, e.g. a CI artifact
 ```
 
-Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. Those you name with `--table` count as just built: an empty table, a column NULL in every row or a duplicate key there is CRITICAL, so an agent can gate on a table it just created. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
+Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. Those you name with `--table` count as just built: an empty table, a column NULL in every row or a duplicate key there is CRITICAL, so an agent can gate on a table it just created. Every `watch`, `ci`, `check` and `verify` run is recorded, passing or not: `scherlok history --runs` lists them. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
 
 ## Works with dbt
 
@@ -287,7 +288,7 @@ pip install scherlok   # scherlok-mcp ships built-in since v0.7.0
 }
 ```
 
-The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, `check`, and `verify` as tools; `verify` is the read-only gate that saves nothing, so an agent that retries can't pass a broken table. Credentials are resolved server-side (never passed by the model), every operation is read-only on the warehouse, and there's no arbitrary-SQL tool.
+The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, `check`, and `verify` as tools; `verify` is the read-only gate that never changes the baseline, so an agent that retries can't pass a broken table. Credentials are resolved server-side (never passed by the model), every operation is read-only on the warehouse, and there's no arbitrary-SQL tool.
 
 📖 Full docs: [MCP server guide →](src/scherlok/mcp/README.md)
 
@@ -397,11 +398,11 @@ scherlok connect <url>          Connect to a database
 scherlok investigate            Profile all tables (learn patterns)
 scherlok watch [-w <url>] [-e <email>]  Detect anomalies and alert
 scherlok ci <url> [opts]        All-in-one CI/CD command (connect + watch + exit code)
-scherlok verify [--table T] [--fail-on L] [--output json]  Read-only gate: compare, save nothing
+scherlok verify [--table T] [--fail-on L] [--output json] [--record PATH]  Read-only gate: compare, keep the baseline
 scherlok dbt [--project-dir .] [--output json]  Profile dbt models from manifest
 scherlok dbt-run-and-watch [--build] [--output json]  Run dbt + profile in one step
 scherlok status [--output json] Quick health dashboard
-scherlok history [--days N] [--output json]  Timeline of past anomalies
+scherlok history [--days N] [--runs] [--output json]  Past anomalies, or every run with --runs
 scherlok report [--output json] Detailed profile summary
 scherlok dashboard [--out .html] Generate self-contained HTML report
 scherlok config --store <url>   Set remote storage

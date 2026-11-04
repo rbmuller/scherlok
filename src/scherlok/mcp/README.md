@@ -89,16 +89,20 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 | `status` | — | connection (redacted), tables visible, anomalies in last 30 days |
 | `history` | `days?` | anomalies recorded in the last N days |
 | `check` | `fail_on?` | CI-style pass/fail gate (`critical` default, or `warning`) |
-| `verify` | `tables?`, `fail_on?` | read-only pass/fail gate: compares with the baseline, saves nothing; lists `tables_without_baseline`, and fails on a named table that is empty or has an all-NULL column or a duplicate key |
+| `verify` | `tables?`, `fail_on?` | read-only pass/fail gate: compares with the baseline, saves no profiles or anomalies; lists `tables_without_baseline`, and fails on a named table that is empty or has an all-NULL column or a duplicate key |
 
 Typical agent flow: `investigate` once to set the baseline, then `watch` (or
 `check`) on later runs to catch drift. `watch` and `check` save every run, so
 after a failure a second call compares against the broken state and passes.
-To gate a change you just made, call `verify`: it writes nothing, so it keeps
-failing until the data is fixed. A table you just created has no baseline yet;
-name it in `verify(tables=[...])` and an empty table, a column NULL in every
-row or a duplicate key in `id` / `<singular table>_id` fails the gate as
-CRITICAL.
+To gate a change you just made, call `verify`: it never changes the baseline,
+so it keeps failing until the data is fixed. A table you just created has no
+baseline yet; name it in `verify(tables=[...])` and an empty table, a column
+NULL in every row or a duplicate key in `id` / `<singular table>_id` fails the
+gate as CRITICAL.
+
+`watch`, `check` and `verify` each record their run, passing or not, as
+`mcp:watch`, `mcp:check` and `mcp:verify`; `scherlok history --runs` lists
+them.
 
 Baselines and history belong to the database of the configured connection,
 so pointing the server at staging never moves the production baseline, even
