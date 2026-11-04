@@ -23,7 +23,7 @@ No YAML, no rules, no thresholds. Scherlok learns what "normal" looks like, then
 
 ```bash
 pip install scherlok
-scherlok ci postgres://user:pass@host/db   # profiles on the first run, detects anomalies on every run after
+scherlok ci postgres://user:pass@host/db   # first run: baseline + new-table checks; every run after: drift
 ```
 
 No database handy? The demo seeds one, learns it, breaks it, and catches it, in about a second:
@@ -63,8 +63,12 @@ Current tools (Great Expectations, Soda, dbt tests) require you to **define what
 | **NULL surge** | NULL rate jumped from 2% to 45% | CRITICAL |
 | **Distribution shift** | Column mean shifted 3+ standard deviations (Shewhart-style control limit) | INFO, WARNING above 5σ |
 | **Cardinality explosion** | Status column went from 5 values to 500 | CRITICAL |
+| **Broken new table** | First sighting, no baseline yet: the table is empty, a column is NULL in every row, or its `id` / `<table>_id` has duplicates | WARNING (CRITICAL under `verify --table`) |
+| **Constant column** | First sighting: one value in 100+ non-NULL rows | INFO |
 
 Every anomaly is auto-scored: **INFO**, **WARNING**, or **CRITICAL**. No thresholds to configure.
+
+A table seen for the first time has nothing to compare against, so it gets the new-table checks instead, from the profile already collected. They report WARNING (INFO for a constant column), so a legitimately empty table doesn't fail `ci` with the default `--fail-on critical`; once the table has a baseline they never run again. `scherlok verify --table` treats the tables it names as just built, so an empty table, an all-NULL column or a duplicate key in one of them is CRITICAL.
 
 ## How It Works
 
@@ -158,7 +162,7 @@ scherlok verify --table orders --fail-on critical   # exit 1 while orders is sti
 scherlok verify --output json                       # one JSON object on stdout
 ```
 
-Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
+Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. Those you name with `--table` count as just built: an empty table, a column NULL in every row or a duplicate key there is CRITICAL, so an agent can gate on a table it just created. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
 
 ## Works with dbt
 

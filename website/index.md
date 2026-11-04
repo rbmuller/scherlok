@@ -4,7 +4,7 @@
 
 ```bash
 pip install scherlok
-scherlok ci postgres://user:pass@host/db   # profiles on the first run, detects anomalies on every run after
+scherlok ci postgres://user:pass@host/db   # first run: baseline + new-table checks; every run after: drift
 ```
 
 No database handy? The demo seeds one, learns it, breaks it, and catches it, in about a second:
@@ -26,6 +26,8 @@ uvx --from "scherlok[duckdb]" scherlok demo
 | NULL surge | NULL rate jumped from 2% to 45% | CRITICAL |
 | Distribution shift | Column mean moved 3+ standard deviations | INFO, WARNING above 5σ |
 | Cardinality explosion | Status column went from 5 values to 500 | CRITICAL |
+| Broken new table | First sighting, no baseline yet: empty, a column NULL in every row, or duplicates in `id` / `<table>_id` | WARNING (CRITICAL under `verify --table`) |
+| Constant column | First sighting: one value in 100+ non-NULL rows | INFO |
 
 Every anomaly is auto-scored **INFO**, **WARNING** or **CRITICAL**. Nothing to configure.
 

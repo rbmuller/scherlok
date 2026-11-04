@@ -142,8 +142,10 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     """Profile tables and detect anomalies against the stored baseline.
 
     Returns the anomalies found (type, severity, message per table), capped.
-    Pass `tables` to limit scope, or omit to watch everything. Tables with no
-    prior baseline are profiled silently (their baseline is set for next time).
+    Pass `tables` to limit scope, or omit to watch everything. A table with no
+    prior baseline gets the new-table checks instead (`empty_table`,
+    `all_null_column`, `duplicate_key` as WARNING, `constant_column` as INFO),
+    and its baseline is set for next time.
     """
     tables_watched, anomalies = _watch_tables(tables)
     return {
@@ -216,8 +218,10 @@ def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> 
     written, so retrying after a failure keeps failing until the data is
     fixed. Pass `tables` to limit scope, or omit to verify everything.
     `fail_on` is `"critical"` (default) or `"warning"`. Tables with no stored
-    baseline are listed in `tables_without_baseline`, never counted as
-    verified, and don't fail the gate on their own; `investigate` sets one.
+    baseline are listed in `tables_without_baseline` and never counted as
+    verified. Naming one in `tables` says it was just built, so an empty
+    table, an all-NULL column or a duplicate key there is CRITICAL; unnamed,
+    they stay WARNING. Once the data is right, `investigate` sets a baseline.
     """
     threshold = normalize_fail_on(fail_on)
     connector = _connect()

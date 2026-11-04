@@ -20,6 +20,10 @@ from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.cardinality import detect_cardinality_anomalies
 from scherlok.detector.distribution_shift import detect_distribution_shift
 from scherlok.detector.freshness import detect_freshness_anomalies
+from scherlok.detector.new_table import (
+    detect_new_table_anomalies,
+    escalate_new_table_anomalies,
+)
 from scherlok.detector.nullability import detect_nullability_anomalies
 from scherlok.detector.schema_drift import detect_schema_drift
 from scherlok.detector.severity import Severity
@@ -49,8 +53,10 @@ def profile_and_detect(
     separately because callers often want the row count inline (e.g. the CLI's
     dbt-style ✓/✗ line) without digging through the saved profile.
 
-    The first time a table is seen there is no baseline, so no anomalies fire —
-    the profiles saved on this run become the baseline for the next one.
+    The first time a table is seen there is no baseline to compare against, so
+    only the new-table checks run (empty table, all-NULL column, duplicate key,
+    constant column), on the profiles already collected. The profiles saved on
+    this run become the baseline for the next one.
 
     With ``persist=False`` nothing is saved: the current state is compared with
     the baseline and discarded. A gate needs this, because a saved failing run
@@ -78,9 +84,11 @@ def profile_and_detect(
     if stored_fresh:
         anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))
 
+    current_dists: dict[str, dict] = {}
     for col in (current_sch or {}).get("columns", []):
         col_name = col["name"]
         current_dist = profile_distribution(connector, table, col_name)
+        current_dists[col_name] = current_dist
         distribution_history = store.get_profile_history(
             table,
             f"distribution:{col_name}",
@@ -112,6 +120,11 @@ def profile_and_detect(
             )
         if persist:
             store.save_profile(table, f"distribution:{col_name}", current_dist)
+
+    if stored_vol is None:
+        anomalies.extend(
+            detect_new_table_anomalies(table, current_vol, current_sch or {}, current_dists)
+        )
 
     if persist:
         store.save_profile(table, VOLUME_PROFILE, current_vol)
@@ -185,9 +198,11 @@ def verify_tables(
 
     ``tables`` limits the run to those names (unknown names raise
     ``UnknownTablesError``); ``None`` verifies every visible table. A table
-    without a baseline is still profiled, so anything detectable on a first
-    sighting is reported, but it is listed apart and never counted as verified.
-    Running this twice on the same data returns the same result.
+    without a baseline still gets the new-table checks, but it is listed apart
+    and never counted as verified. Naming it in ``tables`` says it was just
+    built, so its WARNING new-table findings (empty table, all-NULL column,
+    duplicate key) count as CRITICAL. Running this twice on the same data
+    returns the same result.
     """
     result = VerificationResult(fail_on=normalize_fail_on(fail_on))
     for table in select_tables(tables, connector.list_tables()):
@@ -196,6 +211,8 @@ def verify_tables(
         else:
             result.tables_without_baseline.append(table)
         anomalies, _ = profile_and_detect(connector, store, table, persist=False)
+        if tables:
+            anomalies = escalate_new_table_anomalies(anomalies)
         result.anomalies.extend(anomalies)
     return result
 

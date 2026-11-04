@@ -533,8 +533,9 @@ def ci(
 ) -> None:
     """All-in-one CI/CD command: connect + investigate + watch + exit code.
 
-    Designed for use in pipelines. Profiles tables on first run (no anomalies),
-    then detects on subsequent runs against stored baseline (use remote storage).
+    Designed for use in pipelines. On its first run a table has no baseline, so
+    it only gets the new-table checks (WARNING, or INFO for a constant column),
+    then later runs detect against the stored baseline (use remote storage).
 
     Example:
         # GitHub Actions
@@ -604,7 +605,7 @@ def _print_verification(result: VerificationResult) -> None:
         overflow = " …" if len(missing) > VERIFY_PREVIEW_TABLES else ""
         out_info(
             f"[yellow]Not verified, no baseline yet ({len(missing)}): {preview}{overflow}. "
-            "Run [bold]scherlok investigate[/bold] to set one.[/yellow]"
+            "Once the data is right, run [bold]scherlok investigate[/bold] to set one.[/yellow]"
         )
     counts = severity_counts(result.anomalies)
     severities = ", ".join(f"{count} {name}" for name, count in reversed(counts.items()))
@@ -638,8 +639,10 @@ def verify(
     A read-only gate: unlike `watch` and `ci`, it writes no profiles, no
     anomalies and no config, and never uploads a remote store, so retrying
     a failed check keeps failing until the data is fixed. Tables without a
-    baseline are listed and never count as verified. The connection comes
-    from SCHERLOK_CONNECTION or `scherlok connect`.
+    baseline are listed and never count as verified; those named with
+    --table count as just built, so an empty table, an all-NULL column or a
+    duplicate key there is CRITICAL. The connection comes from
+    SCHERLOK_CONNECTION or `scherlok connect`.
 
     Example:
         scherlok verify
