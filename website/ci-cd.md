@@ -116,6 +116,39 @@ Each anomaly a run saves carries the run's `run_id`, which `scherlok history --o
 
 `command` is `watch`, `ci`, `check`, `verify`, or `mcp:` followed by the tool name. `fail_on` is the gate the run was judged by; `watch` has no `--fail-on` and is judged on CRITICAL, as its exit code is. `investigate`, `dbt` and `dbt-run-and-watch` runs are not recorded.
 
+## Accepting a change from CI
+
+A CRITICAL reading is never learned, and with [locked baselines](getting-started.md#locked-baselines) nothing is, so an intended change becomes the baseline only through `scherlok accept`. Locking and `accept` are a guardrail, not a security boundary: an agent with shell access can run the CLI or edit the SQLite file. For a gate an agent can't get past:
+
+- Run `verify` in CI against a store the agent has no credentials for, such as a bucket only the CI role can write.
+- Lock the baselines (`SCHERLOK_BASELINE_LOCKED=1`) for every run that writes that store, so scheduled runs compare without learning.
+- Run `accept` only from a workflow a person triggers:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      table: { description: "Table to accept", required: true }
+      reason: { description: "Why this state is the new normal", required: true }
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          SCHERLOK_CONNECTION: ${{ secrets.DATABASE_URL }}
+          SCHERLOK_STORE: s3://my-bucket/scherlok/profiles.db
+          TABLE: ${{ inputs.table }}
+          REASON: ${{ inputs.reason }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          pip install scherlok
+          git config --global user.email "$ACTOR@users.noreply.github.com"
+          scherlok accept --table "$TABLE" --reason "$REASON" --yes
+```
+
+The inputs reach the script as environment variables, never pasted into it, so a reason can't inject shell. `accept` records `git config user.email` as the approver, else `$USER`, so the workflow sets it to whoever triggered the run. `scherlok history --approvals --output json` lists what was accepted.
+
 ## GitHub Actions
 
 ```yaml

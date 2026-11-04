@@ -19,8 +19,9 @@ import scherlok.store.sqlite as sqlite_store
 REAL_SCHERLOK_DIR = config.SCHERLOK_DIR
 
 # Read by ScherlokConfig on every call; a value exported in the developer's
-# shell would point tests at a real database or a real remote store.
-SCHERLOK_ENV_VARS = (config.ENV_CONNECTION, config.ENV_STORE)
+# shell would point tests at a real database or a real remote store, or lock
+# the baselines every test expects to learn.
+SCHERLOK_ENV_VARS = (config.ENV_CONNECTION, config.ENV_STORE, config.ENV_BASELINE_LOCKED)
 
 
 @pytest.fixture(autouse=True)

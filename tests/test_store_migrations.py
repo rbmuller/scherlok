@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from scherlok.approvals import ApprovalRecord
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.fields import DETAIL_FIELDS, anomaly_details
 from scherlok.runs import COMMAND_WATCH, RunRecord
@@ -16,17 +17,21 @@ from scherlok.store import remote as store_remote
 from scherlok.store import sqlite as store_sqlite
 from scherlok.store.sqlite import (
     ANOMALY_DETAILS_COLUMN,
+    APPEND_ONLY_ERROR,
+    APPROVALS_TABLE,
     CREATE_ANOMALIES_INDEX_SQL,
     CREATE_ANOMALIES_SQL,
     CREATE_INDEX_SQL,
     CREATE_TABLE_SQL,
     MIGRATIONS,
     RAW_VALUE_KEYS,
+    RUN_COLUMNS,
     RUN_ID_COLUMN,
     SCOPE_COLUMN,
     SCOPED_TABLES,
     ProfileStore,
     _add_anomaly_details_column,
+    _add_baseline_approvals,
     _add_runs,
     _add_scope_columns,
     _strip_raw_distribution_values,
@@ -452,3 +457,81 @@ def test_a_store_from_before_any_migration_gets_the_details_column(tmp_path):
 
     assert ANOMALY_DETAILS_COLUMN in _anomaly_columns(path)
     assert _anomalies(path) == [ANOMALY]
+
+
+# ----- baseline_approvals (#109) -----------------------------------------------
+
+# The store the release before #109 leaves: every migration but this one.
+BEFORE_APPROVALS_VERSION = MIGRATIONS.index(_add_baseline_approvals)
+APPROVAL = ApprovalRecord(
+    table_name="people",
+    scope=STAGING_SCOPE,
+    approved_by="reviewer@example.invalid",
+    reason="Planned backfill",
+    before_summary=None,
+    after_summary={"row_count": 6, "column_count": 1, "anomalies": []},
+).to_dict()
+
+
+def _create_previous_release_store(path: Path) -> None:
+    """A store as the release before #109 writes it, with profiles, an anomaly and a run."""
+    _create_old_store(path)
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    for migration in MIGRATIONS[:BEFORE_APPROVALS_VERSION]:
+        migration(conn)
+    run = RunRecord(command=COMMAND_WATCH, scope=STAGING_SCOPE).finish(["people"], [])
+    record = {**run.to_dict(), "tables": json.dumps(run.tables)}
+    conn.execute(
+        f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({', '.join('?' * len(RUN_COLUMNS))})",
+        [record[column] for column in RUN_COLUMNS],
+    )
+    conn.execute(f"PRAGMA user_version = {BEFORE_APPROVALS_VERSION}")
+    conn.commit()
+    conn.close()
+
+
+def _table_rows(path: Path, table: str) -> list[tuple]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+    finally:
+        conn.close()
+
+
+def test_store_from_the_previous_release_gains_approvals_and_keeps_its_rows(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_previous_release_store(path)
+    assert APPROVALS_TABLE not in _tables(path)
+    before = {table: _table_rows(path, table) for table in ("profiles", "anomalies", RUNS_TABLE)}
+
+    store = ProfileStore(db_path=path, scope=STAGING_SCOPE)
+    store.save_approval(APPROVAL)
+    approvals = store.get_approvals()
+    store.close()
+
+    assert _user_version(path) == LATEST_VERSION
+    assert {table: _table_rows(path, table) for table in before} == before
+    assert approvals == [APPROVAL]
+
+
+def test_approvals_migration_is_safe_to_run_twice_and_stays_append_only(tmp_path):
+    path = tmp_path / STORE_FILENAME
+    _create_previous_release_store(path)
+    ProfileStore(db_path=path, scope=STAGING_SCOPE).save_approval(APPROVAL)
+
+    conn = sqlite3.connect(str(path))
+    _add_baseline_approvals(conn)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {BEFORE_APPROVALS_VERSION}")
+    conn.close()
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    assert ProfileStore(db_path=path).get_approvals() == [APPROVAL]
+    conn = sqlite3.connect(str(path))
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match=APPEND_ONLY_ERROR):
+            conn.execute(f"DELETE FROM {APPROVALS_TABLE}")
+    finally:
+        conn.close()

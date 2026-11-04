@@ -97,6 +97,54 @@ CREATE_RUNS_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs (started_at DESC)
 """
 
+APPROVALS_TABLE = "baseline_approvals"
+APPROVAL_BEFORE_KEY = "before_summary"
+APPROVAL_AFTER_KEY = "after_summary"
+APPROVAL_SUMMARY_KEYS = (APPROVAL_BEFORE_KEY, APPROVAL_AFTER_KEY)
+# One row per table `scherlok accept` made the new baseline (#109), in the
+# order `scherlok history --approvals --output json` prints them. The two
+# summaries hold JSON; the "before" one is NULL when there was no baseline.
+APPROVAL_COLUMNS = (
+    "table_name",
+    SCOPE_COLUMN,
+    "approved_by",
+    "reason",
+    APPROVAL_BEFORE_KEY,
+    APPROVAL_AFTER_KEY,
+    "approved_at",
+)
+
+CREATE_APPROVALS_SQL = f"""
+CREATE TABLE IF NOT EXISTS {APPROVALS_TABLE} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    scope TEXT,
+    approved_by TEXT NOT NULL,
+    reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+    before_summary TEXT,
+    after_summary TEXT NOT NULL,
+    approved_at TEXT NOT NULL
+)
+"""
+
+CREATE_APPROVALS_INDEX_SQL = f"""
+CREATE INDEX IF NOT EXISTS idx_approvals_approved ON {APPROVALS_TABLE} (approved_at DESC)
+"""
+
+APPEND_ONLY_ERROR = f"{APPROVALS_TABLE} is append-only"
+# Approvals are an audit trail: a row is never changed or removed through
+# SQL. A guardrail only, since anyone who can write the file can drop these.
+CREATE_APPROVALS_APPEND_ONLY_SQL = tuple(
+    f"""
+CREATE TRIGGER IF NOT EXISTS {APPROVALS_TABLE}_no_{statement.lower()}
+BEFORE {statement} ON {APPROVALS_TABLE}
+BEGIN
+    SELECT RAISE(ABORT, '{APPEND_ONLY_ERROR}');
+END
+"""
+    for statement in ("UPDATE", "DELETE")
+)
+
 
 def _strip_raw_distribution_values(conn: sqlite3.Connection) -> None:
     """Drop the column values older releases kept in distribution profiles (#114)."""
@@ -152,6 +200,14 @@ def _add_anomaly_details_column(conn: sqlite3.Connection) -> None:
     _add_column(conn, "anomalies", ANOMALY_DETAILS_COLUMN, "TEXT")
 
 
+def _add_baseline_approvals(conn: sqlite3.Connection) -> None:
+    """Record every baseline a person accepted with `scherlok accept` (#109)."""
+    conn.execute(CREATE_APPROVALS_SQL)
+    conn.execute(CREATE_APPROVALS_INDEX_SQL)
+    for trigger in CREATE_APPROVALS_APPEND_ONLY_SQL:
+        conn.execute(trigger)
+
+
 # Ordered store migrations. PRAGMA user_version records how many a store has
 # applied, so add a migration by appending a function that takes the
 # connection; never reorder or remove one. Every migration must be idempotent:
@@ -161,6 +217,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _add_scope_columns,  # user_version 2
     _add_runs,  # user_version 3
     _add_anomaly_details_column,  # user_version 4
+    _add_baseline_approvals,  # user_version 5
 )
 
 
@@ -350,6 +407,46 @@ class ProfileStore:
                 **dict(row),
                 RUN_TABLES_KEY: json.loads(row[RUN_TABLES_KEY]),
                 RUN_PASSED_KEY: bool(row[RUN_PASSED_KEY]),
+            }
+            for row in rows
+        ]
+
+    def save_approval(self, approval: dict[str, Any]) -> None:
+        """Append one approval, keyed like APPROVAL_COLUMNS (see `scherlok.approvals`).
+
+        The table only grows: updating or deleting a row is refused.
+        """
+        row = {
+            **approval,
+            **{
+                key: None if approval[key] is None else json.dumps(approval[key], default=str)
+                for key in APPROVAL_SUMMARY_KEYS
+            },
+        }
+        placeholders = ", ".join("?" for _ in APPROVAL_COLUMNS)
+        self._conn.execute(
+            f"INSERT INTO {APPROVALS_TABLE} ({', '.join(APPROVAL_COLUMNS)}) "
+            f"VALUES ({placeholders})",
+            [row[column] for column in APPROVAL_COLUMNS],
+        )
+        self._conn.commit()
+
+    def get_approvals(self, days: int = 30) -> list[dict[str, Any]]:
+        """Approvals of the last N days, newest first, as save_approval took them."""
+        cutoff = datetime.now(timezone.utc).isoformat()
+        rows = self._conn.execute(
+            f"SELECT {', '.join(APPROVAL_COLUMNS)} FROM {APPROVALS_TABLE} "
+            f"WHERE approved_at >= datetime(?, '-' || ? || ' days') AND {SCOPE_FILTER_SQL} "
+            "ORDER BY approved_at DESC, id DESC",
+            (cutoff, days, *self._scope_params()),
+        ).fetchall()
+        return [
+            {
+                **dict(row),
+                **{
+                    key: None if row[key] is None else json.loads(row[key])
+                    for key in APPROVAL_SUMMARY_KEYS
+                },
             }
             for row in rows
         ]
