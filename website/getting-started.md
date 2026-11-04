@@ -39,7 +39,15 @@ scherlok investigate                              # learn your data
 scherlok watch                                    # detect anomalies
 ```
 
-The first `watch` after `investigate` compares against that baseline. Every run saves a new profile, so the baseline keeps learning.
+The first `watch` after `investigate` compares against that baseline. Every run saves a new profile, so the baseline keeps learning, except from a run with a CRITICAL anomaly.
+
+## When the baseline does not learn
+
+A run that finds a CRITICAL anomaly on a table saves the anomaly but none of that table's profiles. The table keeps its baseline, so the alert repeats on every run until the data recovers, and the broken state never becomes the reference. Recovery needs no manual step: once the data is back, the next run passes and is learned again. WARNING and INFO findings are learned, as are the other tables of the same run.
+
+This holds for `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `watch`, `check` and `investigate` tools. `verify` never saves profiles at all. When the change is intended, such as a planned backfill or a new column, re-profile with `scherlok investigate` to make it the new normal.
+
+It includes `freshness_critical`. Freshness is compared with the previous run, so a table updated less often than it is watched, such as a weekly table watched daily, reports it on every run until its next update.
 
 ## Run watch on a schedule
 

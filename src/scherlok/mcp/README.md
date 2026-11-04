@@ -84,7 +84,7 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 | Tool | Args | What it does |
 |------|------|--------------|
 | `list_tables` | — | tables visible to the connection |
-| `investigate` | `tables?` | profile tables, store the baseline |
+| `investigate` | `tables?` | profile tables, store the baseline; `baseline_updated` is false for a table whose state has a CRITICAL anomaly |
 | `watch` | `tables?` | detect anomalies vs baseline (type/severity/message plus structured fields); a table with no baseline yet gets the new-table checks |
 | `status` | — | connection (redacted), tables visible, anomalies in last 30 days |
 | `history` | `days?` | anomalies recorded in the last N days |
@@ -93,8 +93,10 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 | `reconcile` | `source`, `target`, `key_columns?`, `sum_columns?`, `tolerance?` | read-only check that an output table adds up against its input: row counts, keys repeated in the target (join fan-out), keys missing or extra, column totals within an absolute `tolerance`; `passed` is false on any mismatch |
 
 Typical agent flow: `investigate` once to set the baseline, then `watch` (or
-`check`) on later runs to catch drift. `watch` and `check` save every run, so
-after a failure a second call compares against the broken state and passes.
+`check`) on later runs to catch drift. `watch`, `check` and `investigate` save
+every run except for a table with a CRITICAL anomaly, which keeps its baseline,
+so that anomaly is reported again on every call until the data recovers. A
+WARNING is learned, so after one a second call compares against the new state.
 To gate a change you just made, call `verify`: it never changes the baseline,
 so it keeps failing until the data is fixed. A table you just created has no
 baseline yet; name it in `verify(tables=[...])` and an empty table, a column

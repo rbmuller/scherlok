@@ -66,6 +66,7 @@ from scherlok.runs import (
 from scherlok.service import (
     UnknownTablesError,
     VerificationResult,
+    blocks_baseline,
     connection_scope,
     profile_and_detect,
     severity_counts,
@@ -290,13 +291,36 @@ def investigate() -> None:
 
 
 def _watch_table(connector: object, store: ProfileStore, table: str) -> tuple[list[dict], dict]:
-    """Profile one table + detect anomalies against stored baseline. Saves new profiles.
+    """Profile one table + detect anomalies against stored baseline. Saves new profiles,
+    unless a CRITICAL anomaly keeps the baseline (#116).
 
     Thin CLI-facing alias over `service.profile_and_detect` — kept so existing
     call sites and tests that patch `scherlok.cli._watch_table` stay valid.
     Returns (anomalies, current_volume).
     """
     return profile_and_detect(connector, store, table)
+
+
+# Table names a one-line summary lists before it cuts the list short.
+PREVIEW_TABLES = 5
+
+
+def _table_preview(tables: list[str]) -> str:
+    """The first few table names, escaped for Rich, with an ellipsis when cut."""
+    preview = ", ".join(rich_escape(t) for t in tables[:PREVIEW_TABLES])
+    return f"{preview} …" if len(tables) > PREVIEW_TABLES else preview
+
+
+def _print_kept_baselines(tables: list[str]) -> None:
+    """Name the tables whose reading was not learned because of a CRITICAL anomaly (#116)."""
+    if not tables:
+        return
+    out_info(
+        f"[yellow]Baseline kept, CRITICAL reading not learned ({len(tables)}): "
+        f"{_table_preview(tables)}. The alert repeats on every run until the data "
+        "recovers; if the change is intended, [bold]scherlok investigate[/bold] "
+        "makes it the new normal.[/yellow]"
+    )
 
 
 def _dispatch_alerts(
@@ -434,12 +458,15 @@ def _run_watch(
         if tables is None:
             tables = connector.list_tables()
         all_anomalies: list[dict] = []
+        kept_baselines: list[str] = []
 
         out_info(f"Watching [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
             anomalies, _ = _watch_table(connector, store, table)
             all_anomalies.extend(anomalies)
+            if blocks_baseline(anomalies):
+                kept_baselines.append(table)
 
         _dispatch_alerts(
             all_anomalies,
@@ -453,6 +480,7 @@ def _run_watch(
             ),
             run_id=run.run_id,
         )
+        _print_kept_baselines(kept_baselines)
         store.save_run(run.finish(tables, all_anomalies).to_dict())
 
     return all_anomalies
@@ -611,9 +639,6 @@ def check(
     _run_ci(connection_string, webhook, email, fail_on, explain, command=COMMAND_CHECK)
 
 
-VERIFY_PREVIEW_TABLES = 5
-
-
 def _run_verify(
     tables: list[str] | None, fail_on: str, record_path: Path | None = None
 ) -> VerificationResult:
@@ -659,10 +684,8 @@ def _print_verification(result: VerificationResult) -> None:
         print_anomalies(result.anomalies)
     missing = result.tables_without_baseline
     if missing:
-        preview = ", ".join(rich_escape(t) for t in missing[:VERIFY_PREVIEW_TABLES])
-        overflow = " …" if len(missing) > VERIFY_PREVIEW_TABLES else ""
         out_info(
-            f"[yellow]Not verified, no baseline yet ({len(missing)}): {preview}{overflow}. "
+            f"[yellow]Not verified, no baseline yet ({len(missing)}): {_table_preview(missing)}. "
             "Once the data is right, run [bold]scherlok investigate[/bold] to set one.[/yellow]"
         )
     counts = severity_counts(result.anomalies)
@@ -1141,10 +1164,13 @@ def _dbt_impl(
     all_anomalies: list[dict] = []
     json_models: list[dict] = []
     explain_lineage: dict[str, list[str]] = {}
+    kept_baselines: list[str] = []
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = _open_store(conn_str)
         for node, physical in matched:
             table_anomalies, current_vol = _watch_table(connector, store, physical)
+            if blocks_baseline(table_anomalies):
+                kept_baselines.append(physical)
             # Enrich each anomaly's message with downstream-impact info so the
             # downstream context follows the anomaly through prints, JSON, and
             # alerter payloads alike.
@@ -1172,6 +1198,7 @@ def _dbt_impl(
                 adapter=adapter, fail_on=fail_on, lineage=explain_lineage or None
             ),
         )
+        _print_kept_baselines(kept_baselines)
 
     # 5. Summary + exit code
     crit = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("CRITICAL"))

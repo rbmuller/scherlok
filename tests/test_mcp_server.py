@@ -132,7 +132,10 @@ def test_investigate_profiles_a_new_empty_table_silently(wired, duck_connector):
 
     out = wired.investigate(tables=["refunds"])
 
-    assert out == {"profiled": 1, "tables": [{"table": "refunds", "row_count": 0}]}
+    assert out == {
+        "profiled": 1,
+        "tables": [{"table": "refunds", "row_count": 0, "baseline_updated": True}],
+    }
     assert wired.history(days=1)["count"] == 0
 
 

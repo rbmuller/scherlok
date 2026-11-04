@@ -32,9 +32,16 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
-from scherlok.store.sqlite import ProfileStore
+from scherlok.store.sqlite import DISTRIBUTION_PROFILE_PREFIX, ProfileStore
 
 VOLUME_PROFILE = "volume"
+SCHEMA_PROFILE = "schema"
+FRESHNESS_PROFILE = "freshness"
+
+# A reading with an anomaly of this severity never becomes the baseline (#116).
+# Learning it would make the broken state the reference and silence the alert,
+# so the alert repeats on every run until the data recovers.
+BASELINE_BLOCKING_SEVERITY = Severity.CRITICAL
 
 ANOMALIES_KEY = "anomalies"
 TABLES_VERIFIED_KEY = "tables_verified"
@@ -56,6 +63,39 @@ class UnknownTablesError(ValueError):
     """Raised when requested tables are not visible on the connection."""
 
 
+@dataclass
+class TableReading:
+    """One table's current profiles, collected before any of them is saved."""
+
+    volume: dict
+    schema: dict
+    freshness: dict
+    distributions: dict[str, dict] = field(default_factory=dict)
+
+    def profiles(self) -> list[tuple[str, dict]]:
+        """``(profile_type, data)`` pairs, in the order a run saves them."""
+        return [
+            *(
+                (f"{DISTRIBUTION_PROFILE_PREFIX}{column}", profile)
+                for column, profile in self.distributions.items()
+            ),
+            (VOLUME_PROFILE, self.volume),
+            (SCHEMA_PROFILE, self.schema),
+            (FRESHNESS_PROFILE, self.freshness),
+        ]
+
+
+def blocks_baseline(anomalies: list[dict]) -> bool:
+    """True when a reading with these anomalies must not become the baseline (#116)."""
+    return any(anomaly.get("severity") == BASELINE_BLOCKING_SEVERITY for anomaly in anomalies)
+
+
+def save_reading(store: ProfileStore, table: str, reading: TableReading) -> None:
+    """Save every profile of ``reading``, making it the baseline of ``table``."""
+    for profile_type, data in reading.profiles():
+        store.save_profile(table, profile_type, data)
+
+
 def profile_and_detect(
     connector: BaseConnector, store: ProfileStore, table: str, *, persist: bool = True
 ) -> tuple[list[dict], dict]:
@@ -65,14 +105,32 @@ def profile_and_detect(
     separately because callers often want the row count inline (e.g. the CLI's
     dbt-style ✓/✗ line) without digging through the saved profile.
 
-    The first time a table is seen there is no baseline to compare against, so
-    only the new-table checks run (empty table, all-NULL column, duplicate key,
-    constant column), on the profiles already collected. The profiles saved on
-    this run become the baseline for the next one.
+    The profiles saved on this run become the baseline for the next one,
+    unless the run finds a CRITICAL anomaly on the table: then none of the
+    table's profiles are saved, so the broken state never becomes the
+    reference and the anomaly is reported again on every run until the data
+    recovers or the table is re-profiled (#116). WARNING and INFO findings
+    are learned.
 
     With ``persist=False`` nothing is saved: the current state is compared with
     the baseline and discarded. A gate needs this, because a saved failing run
     becomes the next baseline and a simple retry would then pass.
+    """
+    anomalies, reading = inspect_table(connector, store, table)
+    if persist and not blocks_baseline(anomalies):
+        save_reading(store, table, reading)
+    return anomalies, reading.volume
+
+
+def inspect_table(
+    connector: BaseConnector, store: ProfileStore, table: str
+) -> tuple[list[dict], TableReading]:
+    """Profile one table and detect anomalies against its stored baseline. Saves nothing.
+
+    Returns ``(anomalies, reading)``; ``save_reading`` makes the reading the
+    baseline. The first time a table is seen there is no baseline to compare
+    against, so only the new-table checks run (empty table, all-NULL column,
+    duplicate key, constant column), on the profiles already collected.
     """
     anomalies: list[dict] = []
 
@@ -87,12 +145,12 @@ def profile_and_detect(
         )
 
     current_sch = profile_schema(connector, table)
-    stored_sch = store.get_latest_profile(table, "schema")
+    stored_sch = store.get_latest_profile(table, SCHEMA_PROFILE)
     if stored_sch:
         anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
 
     current_fresh = profile_freshness(connector, table)
-    stored_fresh = store.get_latest_profile(table, "freshness")
+    stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
     if stored_fresh:
         anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))
 
@@ -130,20 +188,18 @@ def profile_and_detect(
                     history=distribution_history,
                 )
             )
-        if persist:
-            store.save_profile(table, f"distribution:{col_name}", current_dist)
 
     if stored_vol is None:
         anomalies.extend(
             detect_new_table_anomalies(table, current_vol, current_sch or {}, current_dists)
         )
 
-    if persist:
-        store.save_profile(table, VOLUME_PROFILE, current_vol)
-        store.save_profile(table, "schema", current_sch)
-        store.save_profile(table, "freshness", current_fresh)
-
-    return anomalies, current_vol
+    return anomalies, TableReading(
+        volume=current_vol,
+        schema=current_sch,
+        freshness=current_fresh,
+        distributions=current_dists,
+    )
 
 
 def has_baseline(store: ProfileStore, table: str) -> bool:

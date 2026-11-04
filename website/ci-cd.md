@@ -16,7 +16,7 @@ scherlok ci "$DATABASE_URL" --webhook "$SLACK_WEBHOOK" --fail-on critical
 
 ## Read-only gate: `scherlok verify`
 
-`ci` saves every run, which is what a monitor should do, but it weakens a gate: after a failure the broken state becomes the baseline, so a retry passes. An AI agent or a CI job that retries would get a green result on a broken table.
+`ci` learns every run, which is what a monitor should do, but it weakens a gate. A CRITICAL reading is never learned (see [When the baseline does not learn](getting-started.md#when-the-baseline-does-not-learn)), so a CRITICAL failure repeats; a WARNING, or the first sighting of a broken new table, is learned, so a retry on `--fail-on warning` passes. An AI agent or a CI job that retries needs a gate that changes nothing.
 
 `scherlok verify` compares the current state with the stored baseline and never changes it, so a retry keeps failing until the data is fixed:
 

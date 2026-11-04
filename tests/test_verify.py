@@ -119,7 +119,7 @@ def test_retrying_verify_on_a_broken_table_keeps_failing(warehouse, home):
 
 
 def test_watch_after_verify_still_sees_the_breakage(warehouse, home):
-    """verify must not teach the baseline the broken state; watch does."""
+    """verify never teaches the baseline the broken state; since #116 watch doesn't either."""
     _learn_baseline()
     _keep_rows(warehouse, 300)
     runner.invoke(app, ["verify"])
@@ -128,7 +128,7 @@ def test_watch_after_verify_still_sees_the_breakage(warehouse, home):
     second_watch = runner.invoke(app, ["watch"])
 
     assert first_watch.exit_code == 1
-    assert second_watch.exit_code == 0  # watch learned the new state; verify didn't
+    assert second_watch.exit_code == 1  # the CRITICAL reading was not learned
 
 
 def test_verify_text_mode_reports_the_failure(warehouse):

@@ -34,7 +34,7 @@ Every anomaly is auto-scored **INFO**, **WARNING** or **CRITICAL**. Nothing to c
 ## How it works
 
 1. **`scherlok investigate`** profiles every table: row counts, column types, NULL rates, value distributions, freshness cadence, cardinality. Profiles are stored in SQLite, locally or in S3 / GCS / Azure Blob.
-2. **`scherlok watch`** re-profiles and compares against the stored baseline. After five valid profiles it learns per-metric variability from the latest 30 runs (robust median/MAD bands); during cold start it uses conservative fixed thresholds.
+2. **`scherlok watch`** re-profiles and compares against the stored baseline. After five valid profiles it learns per-metric variability from the latest 30 runs (robust median/MAD bands); during cold start it uses conservative fixed thresholds. A reading with a CRITICAL anomaly is never learned, so the alert repeats until the data recovers.
 3. **Alert** to Slack, Discord, Teams, e-mail, any webhook, or fail the CI pipeline with `--fail-on critical`.
 
 Works with **PostgreSQL, BigQuery, Snowflake, MySQL, DuckDB**, with or without **dbt**.
