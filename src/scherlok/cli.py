@@ -534,9 +534,15 @@ def _run_ci(
         _print_connect_failure(connector)
         raise typer.Exit(code=1)
 
-    # Run watch (does profile + detect + alert in one)
+    # Run watch (does profile + detect + alert in one) on the database given
+    # here, not on SCHERLOK_CONNECTION, which would otherwise take precedence.
     anomalies = _run_watch(
-        webhook=webhook, emails=email or None, explain=explain, fail_on=fail_on, command=command
+        webhook=webhook,
+        emails=email or None,
+        connector=connector,
+        explain=explain,
+        fail_on=fail_on,
+        command=command,
     )
 
     if fails_gate(anomalies, fail_on):
