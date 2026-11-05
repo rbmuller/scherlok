@@ -3,7 +3,25 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from scherlok.connectors.base import BaseConnector
+from scherlok.connectors.base import TABLE_NAME_SEPARATOR, BaseConnector
+
+_BACKSLASH = "\\"
+_BACKTICK = "`"
+_SINGLE_QUOTE = "'"
+
+# Metadata of the connection's dataset, read by `get_columns` and `get_last_modified`.
+_COLUMNS_VIEW = "INFORMATION_SCHEMA.COLUMNS"
+_TABLES_METADATA = "__TABLES__"
+
+
+def _escape(text: str, quote: str) -> str:
+    """Escape ``quote`` and every backslash in ``text`` with a backslash.
+
+    BigQuery reads the same escape sequences inside backticks (identifiers)
+    and single quotes (strings), so a backslash is escaped first: otherwise
+    a trailing backslash would escape the closing quote.
+    """
+    return text.replace(_BACKSLASH, _BACKSLASH * 2).replace(quote, _BACKSLASH + quote)
 
 
 class BigQueryConnector(BaseConnector):
@@ -103,8 +121,21 @@ class BigQueryConnector(BaseConnector):
         Inside backticks BigQuery reads the escape sequences of a string
         literal, so a backslash and a backtick are escaped with a backslash.
         """
-        escaped = identifier.replace("\\", "\\\\").replace("`", "\\`")
-        return f"`{escaped}`"
+        return f"{_BACKTICK}{_escape(identifier, _BACKTICK)}{_BACKTICK}"
+
+    @staticmethod
+    def _quote_string(value: str) -> str:
+        """Return ``value`` as a single-quoted BigQuery string literal."""
+        return f"{_SINGLE_QUOTE}{_escape(value, _SINGLE_QUOTE)}{_SINGLE_QUOTE}"
+
+    def _dataset_metadata(self, view: str) -> str:
+        """The metadata ``view`` (`_COLUMNS_VIEW`, `_TABLES_METADATA`) of the dataset."""
+        dataset = self._quote_name_parts((self._project, self._dataset))
+        return f"{dataset}{TABLE_NAME_SEPARATOR}{view}"
+
+    def _quote_dataset_table(self, table: str) -> str:
+        """``table``, one name as `list_tables` returns it, in the connection's dataset."""
+        return self._quote_name_parts((self._project, self._dataset, table))
 
     def _table_name_parts(self, table: str) -> list[str]:
         """``table`` in the connection's dataset, ``dataset.table`` or ``project.dataset.table``."""
@@ -124,7 +155,7 @@ class BigQueryConnector(BaseConnector):
 
     def get_row_count(self, table: str) -> int:
         """Return row count for a table."""
-        fqn = f"`{self._project}.{self._dataset}.{table}`"
+        fqn = self._quote_dataset_table(table)
         rows = self._query(f"SELECT COUNT(*) AS cnt FROM {fqn}")
         return rows[0]["cnt"] if rows else 0
 
@@ -132,8 +163,8 @@ class BigQueryConnector(BaseConnector):
         """Return column metadata from INFORMATION_SCHEMA."""
         sql = (
             f"SELECT column_name, data_type, is_nullable "
-            f"FROM `{self._project}.{self._dataset}.INFORMATION_SCHEMA.COLUMNS` "
-            f"WHERE table_name = '{table}' "
+            f"FROM {self._dataset_metadata(_COLUMNS_VIEW)} "
+            f"WHERE table_name = {self._quote_string(table)} "
             f"ORDER BY ordinal_position"
         )
         rows = self._query(sql)
@@ -148,14 +179,15 @@ class BigQueryConnector(BaseConnector):
 
     def get_column_stats(self, table: str, column: str) -> dict:
         """Calculate statistics for a column."""
-        fqn = f"`{self._project}.{self._dataset}.{table}`"
+        fqn = self._quote_dataset_table(table)
+        col = self._quote_identifier(column)
         stats: dict[str, Any] = {}
 
         # Null and distinct counts
         sql = (
             f"SELECT "
-            f"  COUNTIF(`{column}` IS NULL) AS null_count, "
-            f"  COUNT(DISTINCT `{column}`) AS distinct_count "
+            f"  COUNTIF({col} IS NULL) AS null_count, "
+            f"  COUNT(DISTINCT {col}) AS distinct_count "
             f"FROM {fqn}"
         )
         rows = self._query(sql)
@@ -170,8 +202,8 @@ class BigQueryConnector(BaseConnector):
         try:
             sql = (
                 f"SELECT "
-                f"  AVG(CAST(`{column}` AS FLOAT64)) AS mean, "
-                f"  STDDEV(CAST(`{column}` AS FLOAT64)) AS stddev "
+                f"  AVG(CAST({col} AS FLOAT64)) AS mean, "
+                f"  STDDEV(CAST({col} AS FLOAT64)) AS stddev "
                 f"FROM {fqn}"
             )
             rows = self._query(sql)
@@ -189,8 +221,8 @@ class BigQueryConnector(BaseConnector):
         """Return last modification time from __TABLES__ metadata."""
         sql = (
             f"SELECT TIMESTAMP_MILLIS(last_modified_time) AS last_mod "
-            f"FROM `{self._project}.{self._dataset}.__TABLES__` "
-            f"WHERE table_id = '{table}'"
+            f"FROM {self._dataset_metadata(_TABLES_METADATA)} "
+            f"WHERE table_id = {self._quote_string(table)}"
         )
         try:
             rows = self._query(sql)

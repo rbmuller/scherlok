@@ -1,9 +1,15 @@
 """Snowflake connector using snowflake-connector-python."""
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
+from scherlok.connectors.base import TABLE_NAME_SEPARATOR, BaseConnector, quote_ansi_identifier
+
+# Metadata of the connection's database, read by `list_tables`, `get_columns`
+# and `get_last_modified`.
+_TABLES_VIEW = "information_schema.tables"
+_COLUMNS_VIEW = "information_schema.columns"
 
 
 class SnowflakeConnector(BaseConnector):
@@ -115,12 +121,16 @@ class SnowflakeConnector(BaseConnector):
         first_line = msg.splitlines()[0] if msg else "unknown error"
         return first_line
 
-    def _query(self, sql: str) -> list[dict]:
-        """Execute a query and return results as list of dicts."""
+    def _query(self, sql: str, params: Sequence[str] | None = None) -> list[dict]:
+        """Execute a query and return results as list of dicts.
+
+        ``params`` are bound to the ``%s`` placeholders of ``sql`` by the
+        driver, which escapes them, so a value is never pasted into SQL.
+        """
         cur = self._conn.cursor(dict_cursor=True) if hasattr(
             self._conn.cursor(), "dict_cursor"
         ) else self._conn.cursor()
-        cur.execute(sql)
+        cur.execute(sql, params)
         cols = [c[0].lower() for c in cur.description]
         rows = [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
         cur.close()
@@ -145,6 +155,21 @@ class SnowflakeConnector(BaseConnector):
         """Quote a column name, upper-cased like the rest of this connector."""
         return self._quote_identifier(column.upper())
 
+    def _database_metadata(self, view: str) -> str:
+        """The metadata ``view`` (`_TABLES_VIEW`, `_COLUMNS_VIEW`) of the connection's database."""
+        database = self._quote_identifier(self._database.upper())
+        return f"{database}{TABLE_NAME_SEPARATOR}{view}"
+
+    def _quote_schema_table(self, table: str) -> str:
+        """``table``, one name as `list_tables` returns it, in the connection's schema.
+
+        The database, schema and table are upper-cased like `_table_name_parts`,
+        since quoted Snowflake identifiers are case-sensitive.
+        """
+        return self._quote_name_parts(
+            part.upper() for part in (self._database, self._schema, table)
+        )
+
     def _fetch_one(self, sql: str) -> dict[str, Any]:
         """Run ``sql`` and return its single row keyed by lower-case column alias."""
         return self._query(sql)[0]
@@ -152,17 +177,17 @@ class SnowflakeConnector(BaseConnector):
     def list_tables(self) -> list[str]:
         """List all tables and views in the schema."""
         sql = (
-            f"SELECT table_name FROM {self._database}.information_schema.tables "
-            f"WHERE table_schema = '{self._schema.upper()}' "
+            f"SELECT table_name FROM {self._database_metadata(_TABLES_VIEW)} "
+            f"WHERE table_schema = %s "
             f"AND table_type IN ('BASE TABLE', 'VIEW') "
             f"ORDER BY table_name"
         )
-        rows = self._query(sql)
+        rows = self._query(sql, (self._schema.upper(),))
         return [r["table_name"].lower() for r in rows]
 
     def get_row_count(self, table: str) -> int:
         """Return row count for a table."""
-        fqn = f'"{self._database}"."{self._schema}"."{table.upper()}"'
+        fqn = self._quote_schema_table(table)
         rows = self._query(f"SELECT COUNT(*) AS cnt FROM {fqn}")
         return int(rows[0]["cnt"]) if rows else 0
 
@@ -170,12 +195,12 @@ class SnowflakeConnector(BaseConnector):
         """Return column metadata from INFORMATION_SCHEMA."""
         sql = (
             f"SELECT column_name, data_type, is_nullable "
-            f"FROM {self._database}.information_schema.columns "
-            f"WHERE table_schema = '{self._schema.upper()}' "
-            f"AND table_name = '{table.upper()}' "
+            f"FROM {self._database_metadata(_COLUMNS_VIEW)} "
+            f"WHERE table_schema = %s "
+            f"AND table_name = %s "
             f"ORDER BY ordinal_position"
         )
-        rows = self._query(sql)
+        rows = self._query(sql, (self._schema.upper(), table.upper()))
         return [
             {
                 "name": r["column_name"].lower(),
@@ -187,8 +212,8 @@ class SnowflakeConnector(BaseConnector):
 
     def get_column_stats(self, table: str, column: str) -> dict:
         """Calculate statistics for a column."""
-        fqn = f'"{self._database}"."{self._schema}"."{table.upper()}"'
-        col = f'"{column.upper()}"'
+        fqn = self._quote_schema_table(table)
+        col = self._quote_column(column)
         stats: dict[str, Any] = {}
 
         # Null and distinct counts
@@ -229,12 +254,12 @@ class SnowflakeConnector(BaseConnector):
         """Return last modification time from INFORMATION_SCHEMA.TABLES."""
         sql = (
             f"SELECT last_altered "
-            f"FROM {self._database}.information_schema.tables "
-            f"WHERE table_schema = '{self._schema.upper()}' "
-            f"AND table_name = '{table.upper()}'"
+            f"FROM {self._database_metadata(_TABLES_VIEW)} "
+            f"WHERE table_schema = %s "
+            f"AND table_name = %s"
         )
         try:
-            rows = self._query(sql)
+            rows = self._query(sql, (self._schema.upper(), table.upper()))
             if rows and rows[0]["last_altered"]:
                 ts = rows[0]["last_altered"]
                 if isinstance(ts, datetime):

@@ -84,8 +84,9 @@ class PostgresConnector(BaseConnector):
 
     def get_row_count(self, table: str) -> int:
         """Return exact row count for a table."""
+        quoted_table = self._quote_identifier(table)
         with self._cursor() as cur:
-            cur.execute(f"SELECT count(*) AS cnt FROM \"{table}\"")  # noqa: S608
+            cur.execute(f"SELECT count(*) AS cnt FROM {quoted_table}")  # noqa: S608
             return cur.fetchone()["cnt"]
 
     def get_columns(self, table: str) -> list[dict]:
@@ -109,14 +110,16 @@ class PostgresConnector(BaseConnector):
 
     def get_column_stats(self, table: str, column: str) -> dict:
         """Calculate statistics for a numeric or text column."""
+        quoted_table = self._quote_identifier(table)
+        quoted_column = self._quote_identifier(column)
         stats: dict[str, Any] = {}
         with self._cursor() as cur:
             # Null and distinct counts (works for all types)
             cur.execute(
                 f"SELECT "  # noqa: S608
-                f"  count(*) FILTER (WHERE \"{column}\" IS NULL) AS null_count, "
-                f"  count(DISTINCT \"{column}\") AS distinct_count "
-                f"FROM \"{table}\""
+                f"  count(*) FILTER (WHERE {quoted_column} IS NULL) AS null_count, "
+                f"  count(DISTINCT {quoted_column}) AS distinct_count "
+                f"FROM {quoted_table}"
             )
             row = cur.fetchone()
             stats["null_count"] = row["null_count"]
@@ -126,9 +129,9 @@ class PostgresConnector(BaseConnector):
             try:
                 cur.execute(
                     f"SELECT "  # noqa: S608
-                    f"  avg(\"{column}\")::float AS mean, "
-                    f"  stddev(\"{column}\")::float AS stddev "
-                    f"FROM \"{table}\""
+                    f"  avg({quoted_column})::float AS mean, "
+                    f"  stddev({quoted_column})::float AS stddev "
+                    f"FROM {quoted_table}"
                 )
                 num_row = cur.fetchone()
                 stats["mean"] = num_row["mean"]
