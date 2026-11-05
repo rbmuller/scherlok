@@ -1,7 +1,7 @@
 """Abstract base connector for database backends."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -126,9 +126,11 @@ class BaseConnector(ABC):
 
     def _quote_table(self, table: str) -> str:
         """Return ``table`` (optionally dot-qualified) as quoted SQL identifiers."""
-        return TABLE_NAME_SEPARATOR.join(
-            self._quote_identifier(part) for part in self._table_name_parts(table)
-        )
+        return self._quote_name_parts(self._table_name_parts(table))
+
+    def _quote_name_parts(self, parts: Iterable[str]) -> str:
+        """Return ``parts`` as one dot-qualified name, each part quoted on its own."""
+        return TABLE_NAME_SEPARATOR.join(self._quote_identifier(part) for part in parts)
 
     def _quote_column(self, column: str) -> str:
         """Return ``column`` as a quoted SQL identifier."""
