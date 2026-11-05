@@ -30,7 +30,7 @@ runner = CliRunner(env={"NO_COLOR": "1"})
 BASELINE_ROWS = 1000
 REMOTE_STORE = "s3://example-bucket/scherlok/profiles.db"
 JSON_KEYS = {
-    "passed", "fail_on", "tables_verified", "tables_without_baseline",
+    "passed", "fail_on", "against", "ignored", "tables_verified", "tables_without_baseline",
     "anomaly_count", "critical", "warning", "info", "anomalies",
 }
 

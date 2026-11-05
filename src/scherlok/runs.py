@@ -54,7 +54,9 @@ class RunRecord:
     ``fail_on`` is the gate the run was judged by; commands without a
     ``--fail-on`` (`watch`, MCP `watch`) use their exit-code gate, CRITICAL.
     ``passed``, the counts and ``finished_at`` are set by ``finish``; the
-    store refuses a record that was never finished.
+    store refuses a record that was never finished. ``against`` is the scope
+    a `verify --against` run took its baseline from (``scope`` stays the
+    database it checked) and ``ignored`` the checks it skipped.
     """
 
     run_id: str = field(default_factory=_new_run_id)
@@ -69,6 +71,8 @@ class RunRecord:
     info: int = 0
     started_at: str = field(default_factory=_now)
     finished_at: str | None = None
+    against: str | None = None
+    ignored: list[str] = field(default_factory=list)
 
     def finish(self, tables: list[str], anomalies: list[dict]) -> RunRecord:
         """Record the tables checked and the anomalies found, and stamp the end."""

@@ -19,9 +19,12 @@ ANOMALY_DETAILS_COLUMN = "details"
 
 SCOPE_COLUMN = "scope"
 SCOPED_TABLES = ("profiles", "anomalies")
-# Limits a read to the store's scope plus the unscoped rows older releases
-# wrote; a store opened without a scope reads every row. Takes the scope twice.
-SCOPE_FILTER_SQL = f"(? IS NULL OR {SCOPE_COLUMN} IS NULL OR {SCOPE_COLUMN} = ?)"
+# Limits a read to the store's scope plus, unless the store excludes them, the
+# unscoped rows older releases wrote; a store opened without a scope reads
+# every row. Takes the scope twice, then whether unscoped rows count.
+SCOPE_FILTER_SQL = (
+    f"(? IS NULL OR {SCOPE_COLUMN} = ? OR ({SCOPE_COLUMN} IS NULL AND ?))"
+)
 
 # The base schema, as the first release wrote it. Never edit it: later columns
 # and tables come from MIGRATIONS, so a store of any age ends up the same.
@@ -59,8 +62,14 @@ ON anomalies (table_name, detected_at DESC)
 RUN_ID_COLUMN = "run_id"
 RUN_TABLES_KEY = "tables"
 RUN_PASSED_KEY = "passed"
+# The scope `verify --against` took the baseline from, and the checks
+# `verify --ignore` skipped (#110). Every other run has None and [].
+RUN_AGAINST_KEY = "against"
+RUN_IGNORED_KEY = "ignored"
+# Run columns that hold a JSON list.
+RUN_LIST_COLUMNS = (RUN_TABLES_KEY, RUN_IGNORED_KEY)
 # One row per run (#115), in the order `scherlok history --runs --output json`
-# and `scherlok verify --record` print them. `tables` holds a JSON list.
+# and `scherlok verify --record` print them.
 RUN_COLUMNS = (
     RUN_ID_COLUMN,
     "command",
@@ -74,6 +83,8 @@ RUN_COLUMNS = (
     "info",
     "started_at",
     "finished_at",
+    RUN_AGAINST_KEY,
+    RUN_IGNORED_KEY,
 )
 
 CREATE_RUNS_SQL = """
@@ -208,6 +219,17 @@ def _add_baseline_approvals(conn: sqlite3.Connection) -> None:
         conn.execute(trigger)
 
 
+def _add_run_comparison_columns(conn: sqlite3.Connection) -> None:
+    """Record what a `verify` run compared against and what it skipped (#110).
+
+    Runs already in the store, and runs an older release saves, get no
+    ``against`` and an empty ``ignored`` list: they compared with their own
+    baseline and skipped nothing.
+    """
+    _add_column(conn, "runs", RUN_AGAINST_KEY, "TEXT")
+    _add_column(conn, "runs", RUN_IGNORED_KEY, "TEXT NOT NULL DEFAULT '[]'")
+
+
 # Ordered store migrations. PRAGMA user_version records how many a store has
 # applied, so add a migration by appending a function that takes the
 # connection; never reorder or remove one. Every migration must be idempotent:
@@ -218,6 +240,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _add_runs,  # user_version 3
     _add_anomaly_details_column,  # user_version 4
     _add_baseline_approvals,  # user_version 5
+    _add_run_comparison_columns,  # user_version 6
 )
 
 
@@ -228,12 +251,21 @@ class ProfileStore:
     ``service.connection_scope``), so two databases with an ``orders`` table
     keep separate baselines in one store. Saves are tagged with it, and reads
     see the rows of that scope plus the unscoped rows older releases wrote.
+    With ``include_unscoped=False`` reads see the rows of that scope alone,
+    for a caller that must know which database a baseline came from.
     Without a scope, saves are unscoped and reads see every row.
     """
 
-    def __init__(self, db_path: Path | None = None, *, scope: str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        scope: str | None = None,
+        include_unscoped: bool = True,
+    ) -> None:
         self._db_path = db_path or PROFILES_DB
         self._scope = scope
+        self._include_unscoped = include_unscoped
         make_private_dir(self._db_path.parent)
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
@@ -245,9 +277,9 @@ class ProfileStore:
         """The database this store reads and writes for, or None for every one."""
         return self._scope
 
-    def _scope_params(self) -> tuple[str | None, str | None]:
+    def _scope_params(self) -> tuple[str | None, str | None, bool]:
         """Parameters for one SCOPE_FILTER_SQL."""
-        return self._scope, self._scope
+        return self._scope, self._scope, self._include_unscoped
 
     def _init_db(self) -> None:
         """Create tables and indexes if they don't exist."""
@@ -333,6 +365,14 @@ class ProfileStore:
             for row in rows
         ]
 
+    def has_profiles(self) -> bool:
+        """True when this store reads at least one profile, of any table."""
+        row = self._conn.execute(
+            f"SELECT 1 FROM profiles WHERE {SCOPE_FILTER_SQL} LIMIT 1",
+            self._scope_params(),
+        ).fetchone()
+        return row is not None
+
     def save_anomalies(self, anomalies: list[dict], run_id: str | None = None) -> None:
         """Save detected anomalies to history, tagged with the run that found them.
 
@@ -385,7 +425,7 @@ class ProfileStore:
 
     def save_run(self, record: dict[str, Any]) -> None:
         """Save one run record, keyed like RUN_COLUMNS (see `scherlok.runs`)."""
-        row = {**record, RUN_TABLES_KEY: json.dumps(record[RUN_TABLES_KEY])}
+        row = {**record, **{key: json.dumps(record[key]) for key in RUN_LIST_COLUMNS}}
         placeholders = ", ".join("?" for _ in RUN_COLUMNS)
         self._conn.execute(
             f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({placeholders})",
@@ -405,7 +445,7 @@ class ProfileStore:
         return [
             {
                 **dict(row),
-                RUN_TABLES_KEY: json.loads(row[RUN_TABLES_KEY]),
+                **{key: json.loads(row[key]) for key in RUN_LIST_COLUMNS},
                 RUN_PASSED_KEY: bool(row[RUN_PASSED_KEY]),
             }
             for row in rows

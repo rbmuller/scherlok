@@ -39,9 +39,12 @@ from scherlok.service import (
     ANOMALIES_KEY,
     TABLES_VERIFIED_KEY,
     TABLES_WITHOUT_BASELINE_KEY,
+    against_scope,
     anomaly_to_dict,
     blocks_baseline,
     connection_scope,
+    normalize_ignore,
+    open_baseline_store,
     profile_and_detect,
     redact_connection,
     select_tables,
@@ -288,7 +291,12 @@ def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
     }
 
 
-def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
+def verify(
+    tables: list[str] | None = None,
+    fail_on: str = FAIL_ON_CRITICAL,
+    against: str | None = None,
+    ignore: list[str] | None = None,
+) -> dict[str, Any]:
     """Compare tables with the stored baseline and return a pass/fail gate, leaving it unchanged.
 
     Read-only, unlike `watch` and `check`: no profiles or anomalies are
@@ -300,13 +308,32 @@ def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> 
     `tables` says it was just built, so an empty table, an all-NULL column or
     a duplicate key there is CRITICAL; unnamed, they stay WARNING. Once the
     data is right, `investigate` sets a baseline.
+
+    `against` compares with another database's baseline instead, e.g.
+    production's when the connection is a dev schema you just built: its
+    scope, such as `postgresql://db.example.com/shop` (adapter, host, port
+    and path, never a connection string with credentials). Only records
+    saved under that scope count, freshness is not compared, and a scope
+    with no baseline in the store is an error. `ignore=["volume"]` is for a
+    build on sampled data: row counts are not compared and the column checks
+    allow for a sample.
     """
     threshold = normalize_fail_on(fail_on)
+    ignored = normalize_ignore(ignore)
+    scope = _scope_argument(against) if against is not None else None
     connector = _connect()
-    store = _open_store(connector.connection_string)
+    store = open_baseline_store(connector.connection_string, scope)
     try:
-        run = RunRecord(command=MCP_VERIFY, scope=store.scope, fail_on=threshold)
-        result = verify_tables(connector, store, tables, threshold)
+        run = RunRecord(
+            command=MCP_VERIFY,
+            scope=connection_scope(connector.connection_string),
+            fail_on=threshold,
+            against=scope,
+            ignored=ignored,
+        )
+        result = verify_tables(
+            connector, store, tables, threshold, against=scope, ignore=ignored
+        )
         store.save_run(run.finish(result.tables_checked, result.anomalies).to_dict())
     finally:
         store.close()
@@ -314,6 +341,21 @@ def verify(tables: list[str] | None = None, fail_on: str = FAIL_ON_CRITICAL) -> 
     payload["truncated"] = any(len(payload[key]) > cap for key, cap in _VERIFY_CAPS.items())
     payload.update({key: payload[key][:cap] for key, cap in _VERIFY_CAPS.items()})
     return payload
+
+
+def _scope_argument(against: str) -> str:
+    """Accept `against` only as a scope, so credentials never travel in a tool call.
+
+    A connection string, or another spelling of a scope, is refused with the
+    scope to use instead, which holds no credentials; the value itself is
+    never repeated.
+    """
+    scope = against_scope(against)
+    if scope != against:
+        raise ValueError(
+            f"`against` takes a scope, without credentials or options: use {scope}"
+        )
+    return scope
 
 
 def reconcile(

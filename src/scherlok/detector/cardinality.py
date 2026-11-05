@@ -35,6 +35,7 @@ def detect_cardinality_anomalies(
     stored_vol: dict | None = None,
     *,
     history: Sequence[dict] | None = None,
+    sampled: bool = False,
 ) -> list[dict]:
     """Compare current distinct count against stored profile for a column.
 
@@ -52,6 +53,13 @@ def detect_cardinality_anomalies(
 
     ``metric`` says which was compared: ``distinct_ratio`` on the near-unique
     path, ``distinct_count`` otherwise.
+
+    ``sampled=True`` says the current table may hold a sample of the
+    baseline's rows (`scherlok verify --ignore volume`, #110), so only what a
+    sample can't explain is compared: the distinct ratio of a near-unique
+    column, and a gain in distinct values, since a sample can only lose
+    them. ``history`` is not used then: the learned spread is the full
+    table's run-to-run variation, far tighter than a sample's.
     """
     anomalies: list[dict] = []
 
@@ -61,7 +69,7 @@ def detect_cardinality_anomalies(
     if current_card is None or stored_card is None:
         return anomalies
 
-    baseline = adaptive_baseline(history, "distinct_count")
+    baseline = None if sampled else adaptive_baseline(history, "distinct_count")
     if baseline is not None:
         score = baseline.score(current_card)
         if score is None or abs(score) <= ADAPTIVE_SCORE_THRESHOLD:
@@ -151,6 +159,9 @@ def detect_cardinality_anomalies(
                         current_ratio,
                     ))
                     return anomalies
+
+    if sampled and current_card <= stored_card:
+        return anomalies
 
     change_pct = abs(current_card - stored_card) / stored_card * 100
     direction = "increased" if current_card > stored_card else "decreased"

@@ -152,6 +152,28 @@ def test_unscoped_rows_join_every_scope_and_the_newest_row_wins(tmp_path):
     assert _store(path, STAGING).get_latest_profile("orders", "volume") == {"row_count": 500}
 
 
+def test_a_store_that_excludes_unscoped_rows_reads_its_own_scope_alone(tmp_path):
+    """What `verify --against` reads: an unscoped row may be any database's (#110)."""
+    path = tmp_path / STORE_FILENAME
+    _store(path, None).save_profile("orders", "volume", {"row_count": 500})  # pre-upgrade
+    _store(path, STAGING).save_profile("orders", "volume", {"row_count": 10})
+    production_only = ProfileStore(db_path=path, scope=PRODUCTION, include_unscoped=False)
+
+    assert production_only.get_latest_profile("orders", "volume") is None
+    assert production_only.get_profile_history("orders", "volume") == []
+    assert production_only.has_profiles() is False
+    assert _store(path, PRODUCTION).has_profiles() is True  # the unscoped row counts there
+
+    _store(path, PRODUCTION).save_profile("orders", "volume", {"row_count": 1000})
+
+    assert production_only.get_latest_profile("orders", "volume") == {"row_count": 1000}
+    assert [p["row_count"] for p in production_only.get_profile_history("orders", "volume")] == [
+        1000
+    ]
+    assert production_only.has_profiles() is True
+    assert len(_store(path, PRODUCTION).get_profile_history("orders", "volume")) == 2
+
+
 def test_anomalies_are_kept_per_connection(tmp_path):
     path = tmp_path / STORE_FILENAME
     anomaly = {

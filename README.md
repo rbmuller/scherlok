@@ -182,7 +182,10 @@ scherlok ci "$DATABASE_URL" --webhook "$SLACK_WEBHOOK" --fail-on critical
 scherlok verify --table orders --fail-on critical   # exit 1 while orders is still broken
 scherlok verify --output json                       # one JSON object on stdout
 scherlok verify --record scherlok-runs.jsonl        # append the run record, e.g. a CI artifact
+scherlok verify --against postgresql://db.example.com/shop --ignore volume  # a dev build vs production
 ```
+
+`--against` compares the connection's tables, such as a dev build, with another database's baseline in the same store, such as production's, and saves nothing under either: a dropped column fails before the change ships. `--ignore volume` is for builds on sampled data: row counts are not compared, and the column checks only flag what a sample can't explain.
 
 Tables without a baseline are listed under `tables_without_baseline`, never counted as verified. Those you name with `--table` count as just built: an empty table, a column NULL in every row or a duplicate key there is CRITICAL, so an agent can gate on a table it just created. Every `watch`, `ci`, `check` and `verify` run is recorded, passing or not: `scherlok history --runs` lists them. Every anomaly in the JSON also carries `column`, `metric`, `baseline`, `current`, `change_pct` and a fixed `hint`, so it can be acted on without parsing the message. 📖 [CI/CD gate guide →](https://rbmuller.github.io/scherlok/ci-cd/)
 
@@ -446,7 +449,7 @@ scherlok connect <url>          Connect to a database
 scherlok investigate            Profile all tables (learn patterns)
 scherlok watch [-w <url>] [-e <email>]  Detect anomalies and alert
 scherlok ci <url> [opts]        All-in-one CI/CD command (connect + watch + exit code)
-scherlok verify [--table T] [--fail-on L] [--output json] [--record PATH]  Read-only gate: compare, keep the baseline
+scherlok verify [--table T] [--fail-on L] [--output json] [--record PATH] [--against SCOPE] [--ignore volume]  Read-only gate: compare, keep the baseline
 scherlok reconcile --source S --target T [--key K] [--sum C] [--tolerance X] [--output json]  Check an output table against its input
 scherlok accept --table T --reason "..." [--yes]  Make the current state the baseline, with a recorded approval
 scherlok dbt [--project-dir .] [--output json]  Profile dbt models from manifest

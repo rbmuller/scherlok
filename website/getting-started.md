@@ -115,7 +115,7 @@ One store can serve several databases. Each baseline belongs to the database it 
 
 The database is identified by its *scope*: the adapter, host, port and path of the connection string, such as `postgresql://db.example.com/shop`, `snowflake://my-account/SHOP/PUBLIC` or `duckdb:///data/warehouse.duckdb`. The user, password, query string and fragment are never part of it. Spellings of one database share a scope: the adapter and host are lower-cased, `postgres://` counts as `postgresql://`, and the default port (5432, 3306) is dropped. Another host name or IP address for the same server is a new scope with a new baseline, so give every runner that shares a store the same connection string.
 
-Records saved before scopes existed have none and keep counting for every connection, so an upgrade keeps its history; new records are saved under their scope. A runner still on an older release saves records without a scope, which count for every connection again, so upgrade every runner that shares a store.
+Records saved before scopes existed have none and keep counting for every connection, so an upgrade keeps its history; new records are saved under their scope. The exception is [`verify --against`](ci-cd.md#compare-a-build-with-production-verify-against), which compares a build with another database's baseline and reads only the records saved under that database's scope. A runner still on an older release saves records without a scope, which count for every connection again, so upgrade every runner that shares a store.
 
 ## What Scherlok stores
 
@@ -128,7 +128,7 @@ Records saved before scopes existed have none and keep counting for every connec
 | Freshness | the table's last-modified time as the warehouse reports it, hours since then |
 | Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
 | Anomaly history | table, anomaly type, severity, message, detection time, id of the run that found it; the column involved, the metric with its baseline and current values (aggregates or column types), the change in percent and a fixed hint |
-| Runs | command, Scherlok version, names of the tables checked, `--fail-on`, passed or failed, anomaly count per severity, start and end time |
+| Runs | command, Scherlok version, names of the tables checked, `--fail-on`, passed or failed, anomaly count per severity, start and end time; for `verify`, the scope given to `--against` and the checks `--ignore` left out |
 | Baseline approvals | table, who approved, reason, row and column counts before and after, the accepted anomalies' types, severities and aggregates, time |
 | Scope, on every profile, anomaly, run and approval | adapter, host, port and path of the connection, never credentials |
 

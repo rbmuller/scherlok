@@ -290,7 +290,7 @@ def test_verify_payload_shape(wired):
     out = wired.verify(fail_on="warning")
 
     assert set(out) == {
-        "passed", "fail_on", "tables_verified", "tables_without_baseline",
+        "passed", "fail_on", "against", "ignored", "tables_verified", "tables_without_baseline",
         "anomaly_count", "critical", "warning", "info", "anomalies", "truncated",
     }
     assert out["fail_on"] == "warning"
@@ -349,6 +349,84 @@ def test_verify_invalid_fail_on_raises_before_connecting(wired, monkeypatch):
     monkeypatch.setattr(wired, "_connect", lambda: pytest.fail("must not connect"))
     with pytest.raises(ValueError, match="fail_on"):
         wired.verify(fail_on="banana")
+
+
+# ----- verify against another database (#110) --------------------------------
+
+PRODUCTION_SCOPE = "duckdb:///prod.duckdb"
+SECRET = "S3CRET-pw"
+
+
+def _learn_production_orders(tmp_path) -> None:
+    """Production's `orders` baseline in the shared store, with a `note` column
+    the connection's `orders` (the build to check) lacks."""
+    from scherlok.connectors.duckdb import DuckDBConnector
+    from scherlok.service import profile_and_detect
+    from scherlok.store.sqlite import ProfileStore
+
+    production = DuckDBConnector("duckdb:///:memory:")
+    assert production.connect() is True
+    production._conn.execute("CREATE TABLE orders (id INTEGER, amount DOUBLE, note VARCHAR)")
+    production._conn.execute("INSERT INTO orders SELECT i, i * 10.0, 'n' FROM range(1, 31) t(i)")
+    store = ProfileStore(db_path=tmp_path / "profiles.db", scope=PRODUCTION_SCOPE)
+    profile_and_detect(production, store, "orders")
+    store.close()
+
+
+def test_verify_against_compares_with_the_other_databases_baseline(wired, tmp_path):
+    from scherlok.store.sqlite import ProfileStore
+
+    _learn_production_orders(tmp_path)
+    before = _store_row_counts(tmp_path)
+
+    sampled = wired.verify(tables=["orders"], against=PRODUCTION_SCOPE, ignore=["volume"])
+    unsampled = wired.verify(tables=["orders"], against=PRODUCTION_SCOPE)
+
+    assert sampled["passed"] is False
+    assert [(a["type"], a["column"]) for a in sampled["anomalies"]] == [("column_removed", "note")]
+    assert sampled["against"] == PRODUCTION_SCOPE and sampled["ignored"] == ["volume"]
+    assert sampled["tables_verified"] == ["orders"]
+    assert "volume_drop" in {a["type"] for a in unsampled["anomalies"]}  # 30 -> 3 rows
+    assert _store_row_counts(tmp_path) == before
+    runs = ProfileStore(db_path=tmp_path / "profiles.db").get_runs()
+    assert [(r["command"], r["scope"], r["against"], r["ignored"]) for r in runs] == [
+        ("mcp:verify", "duckdb:///:memory:", PRODUCTION_SCOPE, []),
+        ("mcp:verify", "duckdb:///:memory:", PRODUCTION_SCOPE, ["volume"]),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("against", "suggested"),
+    [
+        (f"postgresql://alice:{SECRET}@db.example.com:5432/shop", "postgresql://db.example.com/shop"),
+        (f"duckdb:///prod.duckdb?motherduck_token={SECRET}", PRODUCTION_SCOPE),
+        ("postgres://db.example.com/shop", "postgresql://db.example.com/shop"),
+    ],
+)
+def test_verify_against_takes_a_scope_never_a_connection_string(
+    wired, monkeypatch, against, suggested
+):
+    monkeypatch.setattr(wired, "_connect", lambda: pytest.fail("must not connect"))
+
+    with pytest.raises(ValueError) as refused:
+        wired.verify(against=against)
+
+    assert SECRET not in str(refused.value)
+    assert str(refused.value).endswith(f"use {suggested}")
+
+
+def test_verify_against_refuses_bad_input_before_connecting(wired, monkeypatch):
+    monkeypatch.setattr(wired, "_connect", lambda: pytest.fail("must not connect"))
+
+    with pytest.raises(ValueError, match="scope or a connection string"):
+        wired.verify(against="production")
+    with pytest.raises(ValueError, match="Unknown check to ignore"):
+        wired.verify(ignore=["freshness"])
+
+
+def test_verify_against_a_scope_without_baseline_raises(wired):
+    with pytest.raises(ValueError, match="No baseline for duckdb:///prod.duckdb"):
+        wired.verify(against=PRODUCTION_SCOPE)
 
 
 # ----- protocol smoke test --------------------------------------------------
