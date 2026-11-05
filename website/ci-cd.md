@@ -149,17 +149,63 @@ jobs:
 
 The inputs reach the script as environment variables, never pasted into it, so a reason can't inject shell. `accept` records `git config user.email` as the approver, else `$USER`, so the workflow sets it to whoever triggered the run. `scherlok history --approvals --output json` lists what was accepted.
 
-## GitHub Actions
+## GitHub Action
+
+The pull request is where a reviewer looks, so the result belongs there. `rbmuller/scherlok@v1` runs `scherlok verify` against the stored baseline, writes the job summary, fails the check when an anomaly reaches `fail-on`, and keeps one comment on the pull request up to date:
 
 ```yaml
-- name: Data quality check
-  run: |
-    pip install scherlok
-    scherlok config --store s3://my-bucket/scherlok/profiles.db
-    scherlok ci ${{ secrets.DATABASE_URL }} \
-      --webhook ${{ secrets.SLACK_WEBHOOK }} \
-      --fail-on critical
+name: Data checks
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scherlok:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build the change first, e.g. `dbt run` against a CI schema, and sign the
+      # runner in to the store's cloud, e.g. aws-actions/configure-aws-credentials.
+      - uses: rbmuller/scherlok@v1
+        with:
+          connection: ${{ secrets.DATABASE_URL }}
+          store: s3://my-bucket/scherlok/profiles.db
+          tables: orders,customers
+          fail-on: critical
 ```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `connection` | required | Database connection string, from a secret. |
+| `store` | required | The `s3://`, `gs://` or `az://` URL of the `profiles.db` that `scherlok watch` or `scherlok ci` keeps up to date. The runner needs that cloud's CLI (`aws`, `gsutil` or `az`), signed in. The action downloads it and never uploads it. |
+| `tables` | every table | Tables to verify, separated by commas or new lines. Named tables count as just built, as with `--table`. |
+| `fail-on` | `critical` | `critical` or `warning`. |
+| `comment` | `true` | Create or update one comment on the pull request. |
+| `footer` | `true` | End the comment and the summary with "Checked by Scherlok"; `false` drops it. |
+| `github-token` | `github.token` | Token used to comment; needs `pull-requests: write`. |
+| `extras` | none | Extras your warehouse needs: `bigquery`, `snowflake`, `mysql` or `duckdb`. PostgreSQL needs none. |
+| `scherlok-version` | the release of the action tag | Scherlok version installed from PyPI. `@v1` moves to each release, together with this default. |
+| `install-from` | none | For testing the action: install Scherlok from a local path, such as a checkout, instead of PyPI. |
+
+Outputs: `result` (`passed`, `failed`, `error` when Scherlok could not run the check, or `skipped` for a fork pull request), `anomaly-count`, `report` (the path of the `verify --output json` file) and `comment-url`.
+
+The comment and the job summary show one row per anomaly, most severe first, with the [structured fields](#structured-anomaly-fields); an older Scherlok without them gets the type and the message instead:
+
+| Severity | Table | Column | Metric | Baseline | Current | Change | Details |
+|---|---|---|---|---|---|---|---|
+| 🔴 CRITICAL | `orders` | — | `row_count` | 1,000 | 300 | -70.0% | Row count dropped 70.0% (1,000 -&gt; 300)<br>_Rows were deleted or filtered out; check joins and WHERE clauses changed in this build._ |
+
+A hidden marker finds the comment again, so a re-run or a new push edits it instead of adding another. A run that could not check, for example because the database was unreachable, also updates it, so a stale "passed" never stays.
+
+- **No store, no check.** The baseline has to survive between runs, so a missing `store` fails the step with an error saying so instead of passing with nothing to compare. A store URL with no file yet is a first run: every table is listed as without a baseline. A path to a `profiles.db` on the runner also works, for example one restored by `actions/cache`; it is copied to `~/.scherlok/profiles.db`, where a remote store is downloaded, and never written back. This repository's CI uses one to test the action against a DuckDB file.
+- **The connection stays out of the log and the comment.** Scherlok reads it from `SCHERLOK_CONNECTION`, never from the command line. Before anything runs, the action masks the whole string, its password and any credential query parameter, so a driver error that prints a piece of it shows `***`. Pass the whole string as one secret: GitHub prints an action's inputs at the top of its log and masks only secrets there. The step that talks to the GitHub API never gets the connection, and the step with the connection never gets the token.
+- **No row values.** The comment is rendered from the `verify` JSON fields only: table and column names, aggregates and fixed hints.
+- **Fork pull requests are skipped** with a notice and a summary saying why: GitHub gives them no repository secrets, so there is no connection to check with. Run the check after merging, or from a branch in the repository.
+- **Don't switch to `pull_request_target` to get secrets on forks.** It runs with your secrets and a write token, and a workflow that checks out and builds the pull request's code, such as its dbt models or SQL, hands that code your database credentials. The action skips fork pull requests on `pull_request_target` too.
+- **Permissions:** `contents: read` and `pull-requests: write`, nothing else. A comment that can't be posted, for example on a Dependabot pull request with a read-only token, is a warning; the check's result stands.
+- **Runner:** Linux or macOS with Python 3.10 or newer as `python3`, as on GitHub-hosted runners. Scherlok goes into a virtualenv of its own, leaving the job's packages alone.
 
 ## After `dbt run`
 
@@ -178,7 +224,7 @@ Both accept `--output json` for parsers. See [dbt](dbt.md) for the details.
 
 ## Any other CI
 
-Nothing above is GitHub-specific: install the package, restore the shared store, run `scherlok ci` (or `scherlok verify` for a read-only gate). The exit code does the rest. Worked examples for GitLab CI and CircleCI are welcome as contributions; see the [issue tracker](https://github.com/rbmuller/scherlok/issues).
+Outside GitHub Actions: install the package, restore the shared store, run `scherlok ci` (or `scherlok verify` for a read-only gate). The exit code does the rest. Worked examples for GitLab CI and CircleCI are welcome as contributions; see the [issue tracker](https://github.com/rbmuller/scherlok/issues).
 
 ## Container image
 

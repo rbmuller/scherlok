@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scherlok import __version__
 
@@ -36,6 +37,12 @@ def test_mcp_registry_manifest_versions():
     server = json.loads(_read("server.json"))
     assert server["version"] == __version__
     assert [package["version"] for package in server["packages"]] == [__version__]
+
+
+def test_github_action_pins_this_release():
+    """`uses: rbmuller/scherlok@v1` installs this pin, so the v1 tag must ship with it."""
+    action = yaml.safe_load(_read("action.yml"))
+    assert action["inputs"]["scherlok-version"]["default"] == __version__
 
 
 @pytest.mark.parametrize("doc", ["README.md", "website/dbt-package.md"])

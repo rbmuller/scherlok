@@ -21,7 +21,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ action/
 
       - name: Test
         run: pytest tests/ -v
@@ -35,6 +35,105 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[docs]"
       - run: mkdocs build --strict
+
+  # Runs the GitHub Action from this checkout against a DuckDB fixture: once on
+  # unchanged data (passes, twice, to check the comment is updated in place) and
+  # once on broken data (must fail). The action skips fork pull requests, so on
+  # those every run must report `skipped` instead.
+  action:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build a DuckDB warehouse and learn its baseline
+        run: |
+          FIXTURE="$RUNNER_TEMP/scherlok-fixture"
+          echo "FIXTURE=$FIXTURE" >> "$GITHUB_ENV"
+          pip install -e ".[duckdb]"
+          mkdir -p "$FIXTURE/home"
+          python - "$FIXTURE/warehouse.duckdb" <<'EOF'
+          import sys
+          import duckdb
+          conn = duckdb.connect(sys.argv[1])
+          conn.execute("CREATE TABLE orders AS SELECT i AS id, i * 1.5 AS amount FROM range(1, 501) t(i)")
+          conn.execute("CREATE TABLE customers AS SELECT i AS id FROM range(1, 101) t(i)")
+          conn.close()
+          EOF
+          # The baseline goes to a profiles.db of its own, used as the action's store.
+          HOME="$FIXTURE/home" SCHERLOK_CONNECTION="duckdb://$FIXTURE/warehouse.duckdb" scherlok investigate
+
+      - name: Verify unchanged data
+        id: pass
+        uses: ./
+        with:
+          connection: duckdb://${{ env.FIXTURE }}/warehouse.duckdb
+          store: ${{ env.FIXTURE }}/home/.scherlok/profiles.db
+          tables: orders, customers
+          extras: duckdb
+          install-from: .
+
+      - name: Verify unchanged data again
+        id: pass-again
+        uses: ./
+        with:
+          connection: duckdb://${{ env.FIXTURE }}/warehouse.duckdb
+          store: ${{ env.FIXTURE }}/home/.scherlok/profiles.db
+          tables: orders, customers
+          extras: duckdb
+          install-from: .
+
+      - name: Break the data
+        run: |
+          python - "$FIXTURE/warehouse.duckdb" <<'EOF'
+          import sys
+          import duckdb
+          conn = duckdb.connect(sys.argv[1])
+          conn.execute("DELETE FROM orders WHERE id > 100")  # 80% of the rows gone: CRITICAL
+          conn.close()
+          EOF
+
+      - name: Verify broken data
+        id: fail
+        continue-on-error: true
+        uses: ./
+        with:
+          connection: duckdb://${{ env.FIXTURE }}/warehouse.duckdb
+          store: ${{ env.FIXTURE }}/home/.scherlok/profiles.db
+          tables: orders, customers
+          extras: duckdb
+          install-from: .
+          comment: false
+
+      - name: Check the outcomes
+        env:
+          FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          # Dependabot pull requests get a read-only token, so they can't comment.
+          COMMENTS_EXPECTED: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' }}
+          PASS: ${{ steps.pass.outcome }}/${{ steps.pass.outputs.result }}
+          FAIL: ${{ steps.fail.outcome }}/${{ steps.fail.outputs.result }}
+          ANOMALIES: ${{ steps.fail.outputs.anomaly-count }}
+          COMMENT: ${{ steps.pass.outputs.comment-url }}
+          COMMENT_AGAIN: ${{ steps.pass-again.outputs.comment-url }}
+        run: |
+          echo "pass: $PASS, fail: $FAIL ($ANOMALIES anomalies), comments: '$COMMENT' '$COMMENT_AGAIN'"
+          if [ "$FORK" = "true" ]; then
+            test "$PASS" = "success/skipped"
+            test "$FAIL" = "success/skipped"
+            exit 0
+          fi
+          test "$PASS" = "success/passed"
+          test "$FAIL" = "failure/failed"
+          test "$ANOMALIES" -ge 1
+          if [ "$COMMENTS_EXPECTED" = "true" ]; then
+            test -n "$COMMENT"
+            test "$COMMENT" = "$COMMENT_AGAIN"
+          fi
 
   bundle:
     runs-on: ubuntu-latest

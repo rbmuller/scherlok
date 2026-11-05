@@ -18,7 +18,7 @@ cd scherlok
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"      # base + tests + lint
 pip install -e ".[dbt]"      # if you'll touch dbt integration
-ruff check src/ tests/
+ruff check src/ tests/ action/
 pytest                        # 200+ tests, runs in <1s
 ```
 
@@ -57,7 +57,7 @@ Subject line ≤72 chars. Body explains the *why*, not the *what*. Multi-line is
 
 1. **Branch** from `main` — `feat/<short-description>` or `fix/<short-description>`
 2. **One PR per logical change.** Don't bundle a feature with unrelated cleanup
-4. **Run `ruff check src/ tests/` and `pytest` locally** before pushing — CI mirrors these
+4. **Run `ruff check src/ tests/ action/` and `pytest` locally** before pushing — CI mirrors these
 5. **Open the PR with a body that covers**: what changed, why, how to test, screenshots if UI
 6. **Wait for review** — single approval required to merge
 7. **Squash merge** is the default
@@ -86,13 +86,15 @@ If your warehouse is one users wire up via dbt, add the adapter mapping in [`src
 
 For maintainers only:
 
-1. Bump the version everywhere it is stated: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, both `version` fields in `server.json`, and the `revision: vX.Y.Z` dbt install snippet in `README.md` and `website/dbt-package.md`. `tests/test_release_versions.py` fails if any of them disagree (a partial bump is how v1.0.0 never reached PyPI)
+1. Bump the version everywhere it is stated: `version` in `pyproject.toml`, `__version__` in `src/scherlok/__init__.py`, `version` in `dbt_project.yml`, both `version` fields in `server.json`, the `revision: vX.Y.Z` dbt install snippet in `README.md` and `website/dbt-package.md`, and the `scherlok-version` default in `action.yml` (the version the GitHub Action installs). `tests/test_release_versions.py` fails if any of them disagree (a partial bump is how v1.0.0 never reached PyPI)
 2. Bump the Claude Desktop bundle: `version` in `mcpb/manifest.json`, plus `version` and the `scherlok[...]>=X.Y.Z` floor in `mcpb/pyproject.toml` (no lockfile — the bundle is packed during the release that publishes this version)
 3. Move `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`
 4. PR + merge to main — `tests/test_mcpb.py` fails the PR if the bundle manifest or its `scherlok` floor drifted from the package version
 5. `git tag vX.Y.Z && git push origin vX.Y.Z`
 6. `.github/workflows/release.yml` runs tests, publishes to PyPI via trusted publishing, packs `scherlok-X.Y.Z.mcpb` and creates the GitHub Release with auto-extracted notes and the bundle attached
 7. `.github/workflows/publish-mcp.yml` then publishes `server.json` to the MCP Registry (GitHub OIDC). Check the listing at https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rbmuller/scherlok; re-run it with `gh workflow run publish-mcp.yml --ref main` if needed
+8. Once PyPI shows `X.Y.Z` (the action installs it from there), move the GitHub Action's major tag: `git tag -f v1 vX.Y.Z && git push -f origin v1`. Users on `rbmuller/scherlok@v1` get the new release on their next run. Release and Docker only run on `vX.Y.Z` tags, so this publishes nothing. A breaking change to the action's inputs or outputs needs a new `v2` tag instead
+9. GitHub Marketplace: the first time, open the release on GitHub, edit it, tick **Publish this Action to the GitHub Marketplace** (two-factor authentication and the Marketplace agreement are required), pick the categories and save. For later releases, check that https://github.com/marketplace/actions/scherlok-verify shows the new version, and tick the box on the release if it does not
 
 ## Code of conduct
 

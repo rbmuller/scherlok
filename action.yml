@@ -1,0 +1,128 @@
+name: Scherlok Verify
+description: >-
+  Check data changes against the learned baseline with scherlok verify,
+  fail on anomalies and report them in one pull request comment.
+author: Robson Bayer Müller
+branding:
+  icon: search
+  color: purple
+
+inputs:
+  connection:
+    description: >-
+      Database connection string. Pass it from a secret. It reaches Scherlok
+      through the environment, never the command line, and is masked in the log.
+    required: true
+  store:
+    description: >-
+      Where the baseline lives: the s3://, gs:// or az:// URL of the profiles.db
+      that scherlok watch or scherlok ci keeps up to date. The runner needs that
+      cloud's CLI (aws, gsutil or az), signed in. A path to a profiles.db file on
+      the runner also works, for example one restored from a cache or, in this
+      repository's CI, a test fixture. It is read, never written back.
+    required: true
+  tables:
+    description: Tables to verify, separated by commas or new lines. Empty verifies every table.
+    required: false
+    default: ""
+  fail-on:
+    description: Severity that fails the check, critical or warning.
+    required: false
+    default: critical
+  comment:
+    description: Create or update one comment on the pull request with the result.
+    required: false
+    default: "true"
+  footer:
+    description: End the comment and the job summary with a "Checked by Scherlok" line.
+    required: false
+    default: "true"
+  github-token:
+    description: Token used to comment. It needs pull-requests write permission.
+    required: false
+    default: ${{ github.token }}
+  extras:
+    description: >-
+      Scherlok extras your warehouse needs, comma-separated: bigquery, snowflake,
+      mysql or duckdb. PostgreSQL needs none.
+    required: false
+    default: ""
+  scherlok-version:
+    description: Scherlok version installed from PyPI. Defaults to the release this action ships with.
+    required: false
+    default: "1.0.5"
+  install-from:
+    description: >-
+      For testing this action: install Scherlok from this local path, such as a
+      checkout of the repository, instead of PyPI. Overrides scherlok-version.
+    required: false
+    default: ""
+
+outputs:
+  result:
+    description: passed, failed, error (Scherlok could not run the check) or skipped (a fork pull request).
+    value: ${{ steps.report.outputs.result || steps.preflight.outputs.result }}
+  anomaly-count:
+    description: Number of anomalies found.
+    value: ${{ steps.report.outputs.anomaly-count }}
+  report:
+    description: Path to the JSON printed by scherlok verify --output json.
+    value: ${{ steps.report.outputs.report }}
+  comment-url:
+    description: URL of the pull request comment, when one was posted.
+    value: ${{ steps.report.outputs.comment-url }}
+
+runs:
+  using: composite
+  steps:
+    # Masks the connection before anything else can print it, skips fork pull
+    # requests and checks the inputs. The connection never reaches a command line.
+    - id: preflight
+      shell: bash
+      env:
+        INPUT_CONNECTION: ${{ inputs.connection }}
+        INPUT_STORE: ${{ inputs.store }}
+        INPUT_EXTRAS: ${{ inputs.extras }}
+        INPUT_SCHERLOK_VERSION: ${{ inputs.scherlok-version }}
+        INPUT_INSTALL_FROM: ${{ inputs.install-from }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_FOOTER: ${{ inputs.footer }}
+      run: python3 "$GITHUB_ACTION_PATH/action/scherlok_action.py" preflight
+
+    # A virtualenv of its own, so the job's Python packages are left alone.
+    - id: install
+      if: steps.preflight.outputs.proceed == 'true'
+      shell: bash
+      env:
+        REQUIREMENT: ${{ steps.preflight.outputs.requirement }}
+      run: |
+        venv="$RUNNER_TEMP/scherlok-action/venv"
+        python3 -m venv "$venv"
+        "$venv/bin/python" -m pip install --quiet --disable-pip-version-check "$REQUIREMENT"
+        echo "python=$venv/bin/python" >> "$GITHUB_OUTPUT"
+
+    # The only step with the connection; it has no GitHub token.
+    - id: verify
+      if: steps.preflight.outputs.proceed == 'true'
+      shell: bash
+      env:
+        SCHERLOK_CONNECTION: ${{ inputs.connection }}
+        SCHERLOK_STORE: ${{ steps.preflight.outputs.remote-store }}
+        SCHERLOK_ACTION_LOCAL_STORE: ${{ steps.preflight.outputs.local-store }}
+        SCHERLOK_ACTION_PYTHON: ${{ steps.install.outputs.python }}
+        INPUT_TABLES: ${{ inputs.tables }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: '"$SCHERLOK_ACTION_PYTHON" "$GITHUB_ACTION_PATH/action/scherlok_action.py" verify'
+
+    # The only step with the GitHub token; it has no connection. Runs after an
+    # install or verify error too, so the comment never keeps a stale result.
+    - id: report
+      if: ${{ !cancelled() && steps.preflight.outputs.proceed == 'true' }}
+      shell: bash
+      env:
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_FOOTER: ${{ inputs.footer }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        SCHERLOK_ACTION_REPORT: ${{ steps.verify.outputs.report }}
+        SCHERLOK_ACTION_EXIT_CODE: ${{ steps.verify.outputs.exit-code }}
+      run: python3 "$GITHUB_ACTION_PATH/action/scherlok_action.py" report

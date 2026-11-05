@@ -146,20 +146,35 @@ Auto-detects Slack, Discord, and Teams from the URL and formats the payload acco
 
 ## CI/CD Integration
 
-Use Scherlok as a data quality gate. The `ci` command does it in one line:
+Use Scherlok as a data quality gate on pull requests. The GitHub Action checks the change against the stored baseline, fails the check on anomalies and keeps one comment on the pull request up to date with the table, column, metric, baseline, current value and severity of each:
 
 ```yaml
-# GitHub Actions
-- name: Data quality check
-  run: |
-    pip install scherlok
-    scherlok config --store s3://my-bucket/scherlok/profiles.db
-    scherlok ci ${{ secrets.DATABASE_URL }} \
-      --webhook ${{ secrets.SLACK_WEBHOOK }} \
-      --fail-on critical
+# .github/workflows/data-checks.yml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  scherlok:
+    runs-on: ubuntu-latest
+    steps:
+      # build the change first, e.g. dbt run against a CI schema
+      - uses: rbmuller/scherlok@v1
+        with:
+          connection: ${{ secrets.DATABASE_URL }}
+          store: s3://my-bucket/scherlok/profiles.db
+          tables: orders,customers
+          fail-on: critical
 ```
 
-If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
+The connection is passed through the environment and masked, the comment never holds a value read from a row, and fork pull requests, which get no secrets, are skipped with a notice. 📖 [GitHub Action guide →](https://rbmuller.github.io/scherlok/ci-cd/#github-action)
+
+Anywhere else, the `ci` command does it in one line. If Scherlok detects a critical anomaly, the pipeline fails:
+
+```bash
+scherlok config --store s3://my-bucket/scherlok/profiles.db
+scherlok ci "$DATABASE_URL" --webhook "$SLACK_WEBHOOK" --fail-on critical
+```
 
 `ci` learns every run without a CRITICAL anomaly, so after a failure on `--fail-on warning` the new state becomes the baseline and a retry passes. When a retry must keep failing until the data is fixed, as with an AI agent or a CI job that retries, gate with `verify`. It compares against the stored baseline and saves no profiles, no anomalies and no config, and it never uploads a remote store; it only records the run.
 
