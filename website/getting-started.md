@@ -47,7 +47,7 @@ A run that finds a CRITICAL anomaly on a table saves the anomaly but none of tha
 
 This holds for `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `watch`, `check` and `investigate` tools. `verify` never saves profiles at all. When the change is intended, such as a planned backfill or a new column, re-profile with `scherlok investigate` to make it the new normal.
 
-It includes `freshness_critical`. Freshness is compared with the previous run, so a table updated less often than it is watched, such as a weekly table watched daily, reports it on every run until its next update.
+`freshness_critical` is the exception and is learned like a warning. Freshness compares a table's age with its age on the previous run, so keeping the old reading would report a table updated less often than it is watched, such as a weekly table watched daily, on every run until its next update.
 
 ## Run watch on a schedule
 

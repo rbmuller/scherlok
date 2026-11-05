@@ -19,6 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
+from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL, VOLUME_DROP
 from scherlok.detector.severity import Severity
 from scherlok.service import (
     BASELINE_BLOCKING_SEVERITY,
@@ -43,7 +44,6 @@ BASELINE_ROWS = 1000
 BROKEN_ROWS = 300  # 30% of the rows: a CRITICAL volume_drop
 WARNING_ROWS = 750  # a 25% drop: a WARNING volume_drop
 NATURAL_VARIATION = (-20, -10, 0, 10, 20)
-VOLUME_DROP = "volume_drop"
 KEPT_BASELINE_HINT = "Baseline kept"
 FIXTURES = Path(__file__).parent / "fixtures" / "dbt"
 PG_PROJECT = FIXTURES / "jaffle_shop_postgres"
@@ -208,6 +208,14 @@ def test_blocks_baseline_only_on_critical():
     assert blocks_baseline([anomaly(Severity.INFO), anomaly(Severity.CRITICAL)])
     assert not blocks_baseline([anomaly(Severity.WARNING), anomaly(Severity.INFO)])
     assert not blocks_baseline([])
+
+
+def test_a_critical_freshness_anomaly_alone_does_not_block_learning():
+    def anomaly(anomaly_type):
+        return {"type": anomaly_type, "severity": Severity.CRITICAL}
+
+    assert not blocks_baseline([anomaly(FRESHNESS_CRITICAL)])
+    assert blocks_baseline([anomaly(FRESHNESS_CRITICAL), anomaly(VOLUME_DROP)])
 
 
 # ----- end to end: watch, ci, check, dbt and the MCP tools ----------------------

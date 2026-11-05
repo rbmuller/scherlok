@@ -17,6 +17,7 @@ from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fa
 from scherlok.connectors.base import BaseConnector
 from scherlok.detector.adaptive import ADAPTIVE_HISTORY_LIMIT
 from scherlok.detector.anomaly import detect_volume_anomalies
+from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL
 from scherlok.detector.cardinality import detect_cardinality_anomalies
 from scherlok.detector.distribution_shift import detect_distribution_shift
 from scherlok.detector.fields import anomaly_details
@@ -42,6 +43,11 @@ FRESHNESS_PROFILE = "freshness"
 # Learning it would make the broken state the reference and silence the alert,
 # so the alert repeats on every run until the data recovers.
 BASELINE_BLOCKING_SEVERITY = Severity.CRITICAL
+# Freshness is the exception: it compares a table's age with its age on the
+# previous run, so keeping the old reading would report a table updated less
+# often than it is watched (a weekly table watched daily) on every run, and
+# block learning its other profiles meanwhile.
+NON_BLOCKING_ANOMALY_TYPES = frozenset({FRESHNESS_CRITICAL})
 
 ANOMALIES_KEY = "anomalies"
 TABLES_VERIFIED_KEY = "tables_verified"
@@ -87,7 +93,11 @@ class TableReading:
 
 def blocks_baseline(anomalies: list[dict]) -> bool:
     """True when a reading with these anomalies must not become the baseline (#116)."""
-    return any(anomaly.get("severity") == BASELINE_BLOCKING_SEVERITY for anomaly in anomalies)
+    return any(
+        anomaly.get("severity") == BASELINE_BLOCKING_SEVERITY
+        and anomaly.get("type") not in NON_BLOCKING_ANOMALY_TYPES
+        for anomaly in anomalies
+    )
 
 
 def save_reading(store: ProfileStore, table: str, reading: TableReading) -> None:
