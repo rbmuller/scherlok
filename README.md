@@ -87,6 +87,12 @@ latest 30 profiles using robust historical baselines for volume, numeric mean
 shifts, NULL rates, and distinct counts. During cold start or when history is
 not usable, it keeps the conservative fixed defaults.
 
+Every run is learned, except one that finds a CRITICAL anomaly on a table:
+that table keeps its baseline, so the alert repeats on every run until the
+data recovers, and the broken state never becomes the new normal. WARNING and
+INFO findings are learned. When the change is intended, such as a planned
+backfill, re-profile with `scherlok investigate` to make it the new normal.
+
 ### 1. `investigate` — Learn the patterns
 
 ```bash
@@ -155,7 +161,7 @@ Use Scherlok as a data quality gate. The `ci` command does it in one line:
 
 If Scherlok detects a critical anomaly, the pipeline fails. Bad data never reaches production.
 
-`ci` saves every run, so after a failure the broken state becomes the baseline and a retry passes. When a retry must keep failing until the data is fixed, as with an AI agent or a CI job that retries, gate with `verify`. It compares against the stored baseline and saves no profiles, no anomalies and no config, and it never uploads a remote store; it only records the run.
+`ci` learns every run without a CRITICAL anomaly, so after a failure on `--fail-on warning` the new state becomes the baseline and a retry passes. When a retry must keep failing until the data is fixed, as with an AI agent or a CI job that retries, gate with `verify`. It compares against the stored baseline and saves no profiles, no anomalies and no config, and it never uploads a remote store; it only records the run.
 
 ```bash
 scherlok verify --table orders --fail-on critical   # exit 1 while orders is still broken

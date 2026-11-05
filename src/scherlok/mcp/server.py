@@ -36,6 +36,7 @@ from scherlok.service import (
     TABLES_VERIFIED_KEY,
     TABLES_WITHOUT_BASELINE_KEY,
     anomaly_to_dict,
+    blocks_baseline,
     connection_scope,
     profile_and_detect,
     redact_connection,
@@ -59,6 +60,9 @@ _VERIFY_CAPS = {
     TABLES_VERIFIED_KEY: MAX_TABLES,
     TABLES_WITHOUT_BASELINE_KEY: MAX_TABLES,
 }
+
+# Per table in `investigate`: false when a CRITICAL anomaly kept the old baseline.
+BASELINE_UPDATED_KEY = "baseline_updated"
 
 # Commands the run records of these tools carry.
 MCP_WATCH = mcp_command(COMMAND_WATCH)
@@ -104,7 +108,9 @@ def _watch_tables(
 ) -> tuple[int, list[dict]]:
     """Profile, detect and save profiles and anomalies for `tables` (None = all).
 
-    The run is recorded under `command`, judged by `fail_on`, passing or not.
+    A table with a CRITICAL anomaly keeps its baseline: its profiles are not
+    saved, only the anomalies (#116). The run is recorded under `command`,
+    judged by `fail_on`, passing or not.
     Returns ``(tables_watched, anomalies)`` with the raw anomaly dicts, so
     `check` can decide the gate on every anomaly, not on the capped output.
     """
@@ -150,7 +156,9 @@ def investigate(tables: list[str] | None = None) -> dict[str, Any]:
 
     Pass `tables` to limit to specific tables, or omit to profile everything
     visible. The first profile of a table establishes its baseline; no
-    anomalies are reported here. Run `watch` later to detect drift.
+    anomalies are reported here. Run `watch` later to detect drift. A table
+    whose current state has a CRITICAL anomaly against its baseline keeps that
+    baseline, with `baseline_updated` false: a broken state is not learned.
     """
     connector = _connect()
     targets = select_tables(tables, connector.list_tables())
@@ -158,8 +166,12 @@ def investigate(tables: list[str] | None = None) -> dict[str, Any]:
     try:
         profiled = []
         for table in targets:
-            _anomalies, vol = profile_and_detect(connector, store, table)
-            profiled.append({"table": table, "row_count": vol.get("row_count")})
+            anomalies, vol = profile_and_detect(connector, store, table)
+            profiled.append({
+                "table": table,
+                "row_count": vol.get("row_count"),
+                BASELINE_UPDATED_KEY: not blocks_baseline(anomalies),
+            })
         return {"profiled": len(profiled), "tables": profiled}
     finally:
         store.close()
@@ -174,7 +186,9 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     Pass `tables` to limit scope, or omit to watch everything. A table with no
     prior baseline gets the new-table checks instead (`empty_table`,
     `all_null_column`, `duplicate_key` as WARNING, `constant_column` as INFO),
-    and its baseline is set for next time.
+    and its baseline is set for next time. A table with a CRITICAL anomaly
+    keeps its baseline, so the anomaly is reported again on every call until
+    the data recovers; WARNING and INFO findings are learned.
     """
     tables_watched, anomalies = _watch_tables(tables, MCP_WATCH)
     return {
@@ -232,7 +246,10 @@ def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
 
     `fail_on` is `"critical"` (default — fail only on CRITICAL) or `"warning"`
     (stricter — fail on WARNING or worse). Mirrors `scherlok ci`. Returns
-    `passed` plus the severity counts the decision was based on.
+    `passed` plus the severity counts the decision was based on. Like `watch`,
+    it saves what it sees except a table with a CRITICAL anomaly, so a check
+    failing on CRITICAL keeps failing until the data recovers, while one
+    failing on a WARNING passes next time; `verify` saves nothing.
     """
     threshold = normalize_fail_on(fail_on)
     _tables_watched, anomalies = _watch_tables(None, MCP_CHECK, threshold)
