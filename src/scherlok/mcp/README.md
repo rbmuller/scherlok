@@ -89,7 +89,7 @@ claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok
 | `status` | — | connection (redacted), tables visible, anomalies in last 30 days |
 | `history` | `days?` | anomalies recorded in the last N days |
 | `check` | `fail_on?` | CI-style pass/fail gate (`critical` default, or `warning`) |
-| `verify` | `tables?`, `fail_on?` | read-only pass/fail gate: compares with the baseline, saves no profiles or anomalies; lists `tables_without_baseline`, and fails on a named table that is empty or has an all-NULL column or a duplicate key |
+| `verify` | `tables?`, `fail_on?`, `against?`, `ignore?` | read-only pass/fail gate: compares with the baseline, or with another database's (`against`, a scope), saves no profiles or anomalies; lists `tables_without_baseline`, and fails on a named table that is empty or has an all-NULL column or a duplicate key; `ignore=["volume"]` for a build on sampled data |
 | `reconcile` | `source`, `target`, `key_columns?`, `sum_columns?`, `tolerance?` | read-only check that an output table adds up against its input: row counts, keys repeated in the target (join fan-out), keys missing or extra, column totals within an absolute `tolerance`; `passed` is false on any mismatch |
 
 Typical agent flow: `investigate` once to set the baseline, then `watch` (or
@@ -102,6 +102,17 @@ so it keeps failing until the data is fixed. A table you just created has no
 baseline yet; name it in `verify(tables=[...])` and an empty table, a column
 NULL in every row or a duplicate key in `id` / `<singular table>_id` fails the
 gate as CRITICAL.
+
+When the server's connection is a dev schema or database you just built,
+`verify(against="postgresql://db.example.com/shop")` compares it with
+production's baseline, if production was profiled into the same store. Give
+`against` as a scope (adapter, host, port and path): a connection string is
+refused, so credentials never travel in a tool call. Only records saved under
+that scope count, freshness is not compared, and a scope with no baseline is
+an error rather than a pass. Add `ignore=["volume"]` when the build ran on
+sampled data: row counts are not compared and the column checks only flag
+what a sample can't explain. See
+[Compare a build with production](https://rbmuller.github.io/scherlok/ci-cd/#compare-a-build-with-production-verify-against).
 
 `watch`, `check` and `verify` each record their run, passing or not, as
 `mcp:watch`, `mcp:check` and `mcp:verify`; `scherlok history --runs` lists

@@ -449,3 +449,62 @@ class TestCardinalityNearUniqueColumns:
         assert len(anomalies) == 1
         assert anomalies[0]["severity"] == Severity.CRITICAL
         assert "distinct ratio" in anomalies[0]["message"]
+
+
+class TestCardinalityOnASample:
+    """`sampled=True` (`verify --ignore volume`): only what a sample can't explain fires."""
+
+    STORED_VOL = {"row_count": 10_000}
+    SAMPLE_VOL = {"row_count": 1_000}
+    # A steady learned baseline of 2,000 customers, as a production table has.
+    HISTORY = [{"distinct_count": count} for count in (1990, 1995, 2000, 2005, 2010)]
+
+    def _detect(self, current: int, stored: int, **kwargs):
+        return detect_cardinality_anomalies(
+            "orders",
+            "customer_id",
+            {"distinct_count": current},
+            {"distinct_count": stored},
+            self.SAMPLE_VOL,
+            self.STORED_VOL,
+            sampled=True,
+            **kwargs,
+        )
+
+    def test_fewer_distinct_values_in_a_sample_are_silent(self):
+        assert self._detect(current=600, stored=2000) == []
+        assert self._detect(current=1, stored=50) == []  # one tenant's slice
+
+    def test_the_absolute_comparison_still_fires_without_sampled(self):
+        """Control: the same decrease fires when the table is not a sample."""
+        anomalies = detect_cardinality_anomalies(
+            "orders", "customer_id", {"distinct_count": 600}, {"distinct_count": 2000},
+            self.SAMPLE_VOL, self.STORED_VOL,
+        )
+        assert [a["severity"] for a in anomalies] == [Severity.WARNING]
+
+    def test_more_distinct_values_than_the_baseline_still_fire(self):
+        anomalies = self._detect(current=6000, stored=2000)
+
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+        assert "increased" in anomalies[0]["message"]
+
+    def test_lost_uniqueness_still_fires_on_a_sample(self):
+        anomalies = detect_cardinality_anomalies(
+            "orders", "id", {"distinct_count": 400}, {"distinct_count": 10_000},
+            self.SAMPLE_VOL, self.STORED_VOL, sampled=True,
+        )
+
+        assert [a["severity"] for a in anomalies] == [Severity.CRITICAL]
+        assert "distinct ratio" in anomalies[0]["message"]
+
+    def test_the_learned_baseline_is_not_used(self):
+        learned = self._detect(current=600, stored=2000, history=self.HISTORY)
+        unsampled = detect_cardinality_anomalies(
+            "orders", "customer_id", {"distinct_count": 600}, {"distinct_count": 2000},
+            self.SAMPLE_VOL, self.STORED_VOL, history=self.HISTORY,
+        )
+
+        assert learned == []
+        assert "learned baseline" in unsampled[0]["message"]

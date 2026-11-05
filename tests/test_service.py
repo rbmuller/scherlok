@@ -205,6 +205,8 @@ def test_verification_result_to_dict():
     assert result.to_dict() == {
         "passed": False,
         "fail_on": "critical",
+        "against": None,
+        "ignored": [],
         "tables_verified": ["users"],
         "tables_without_baseline": ["orders"],
         "anomaly_count": 2,

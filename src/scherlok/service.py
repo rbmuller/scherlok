@@ -9,6 +9,7 @@ transport; it takes a connector + store and returns plain data.
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
@@ -17,7 +18,7 @@ from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fa
 from scherlok.connectors.base import BaseConnector
 from scherlok.detector.adaptive import ADAPTIVE_HISTORY_LIMIT
 from scherlok.detector.anomaly import detect_volume_anomalies
-from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL
+from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL, TABLE_EMPTY
 from scherlok.detector.cardinality import detect_cardinality_anomalies
 from scherlok.detector.distribution_shift import detect_distribution_shift
 from scherlok.detector.fields import anomaly_details
@@ -33,11 +34,32 @@ from scherlok.profiler.distribution import profile_distribution
 from scherlok.profiler.freshness import profile_freshness
 from scherlok.profiler.schema import profile_schema
 from scherlok.profiler.volume import profile_volume
-from scherlok.store.sqlite import DISTRIBUTION_PROFILE_PREFIX, ProfileStore
+from scherlok.store.sqlite import (
+    DISTRIBUTION_PROFILE_PREFIX,
+    RUN_AGAINST_KEY,
+    RUN_IGNORED_KEY,
+    ProfileStore,
+)
 
 VOLUME_PROFILE = "volume"
 SCHEMA_PROFILE = "schema"
 FRESHNESS_PROFILE = "freshness"
+
+# Checks `inspect_table` can leave out (#110).
+CHECK_VOLUME = "volume"
+CHECK_FRESHNESS = "freshness"
+# What `verify --ignore` accepts. Ignoring volume is for a build on sampled
+# data: row counts are not compared, and the column checks compare only what
+# a sample can't explain (see `inspect_table`).
+IGNORABLE_CHECKS = (CHECK_VOLUME,)
+# Never compared by `verify --against`: a copy is updated when it is built,
+# not on the schedule of the database it is compared with, so the two ages
+# say nothing about each other.
+AGAINST_SKIPPED_CHECKS = frozenset({CHECK_FRESHNESS})
+# A table with rows in the baseline and none in a sample may be a broken
+# build or a sample that missed a sparse table: reported, never CRITICAL.
+SAMPLED_EMPTY_TABLE_SEVERITY = Severity.WARNING
+AGAINST_EXAMPLE = "postgresql://db.example.com/shop"
 
 # A reading with an anomaly of this severity never becomes the baseline (#116).
 # Learning it would make the broken state the reference and silence the alert,
@@ -67,6 +89,11 @@ SCOPE_DEFAULT_PORTS = {"postgresql": 5432, "mysql": 3306}
 
 class UnknownTablesError(ValueError):
     """Raised when requested tables are not visible on the connection."""
+
+
+class AgainstScopeError(ValueError):
+    """Raised when `verify --against` names the database being verified, or one
+    the store has no baseline for."""
 
 
 @dataclass
@@ -133,7 +160,11 @@ def profile_and_detect(
 
 
 def inspect_table(
-    connector: BaseConnector, store: ProfileStore, table: str
+    connector: BaseConnector,
+    store: ProfileStore,
+    table: str,
+    *,
+    skip: Collection[str] = frozenset(),
 ) -> tuple[list[dict], TableReading]:
     """Profile one table and detect anomalies against its stored baseline. Saves nothing.
 
@@ -141,8 +172,18 @@ def inspect_table(
     baseline. The first time a table is seen there is no baseline to compare
     against, so only the new-table checks run (empty table, all-NULL column,
     duplicate key, constant column), on the profiles already collected.
+
+    ``skip`` leaves checks out. ``CHECK_FRESHNESS`` skips the freshness
+    comparison. ``CHECK_VOLUME`` says the table may hold a sample of the
+    baseline's rows, so only what a sample can't explain is compared: row
+    counts are not, except that a table now empty is a WARNING; cardinality
+    compares the distinct ratio of near-unique columns and gains in distinct
+    values; NULL rates and means are compared with the latest baseline alone,
+    since the spread learned from history is the full table's run-to-run
+    variation, far tighter than a sample's.
     """
     anomalies: list[dict] = []
+    sampled = CHECK_VOLUME in skip
 
     current_vol = profile_volume(connector, table)
     volume_history = store.get_profile_history(
@@ -151,7 +192,9 @@ def inspect_table(
     stored_vol = store.get_latest_profile(table, VOLUME_PROFILE)
     if stored_vol:
         anomalies.extend(
-            detect_volume_anomalies(table, current_vol, stored_vol, history=volume_history)
+            _sampled_volume_anomalies(table, current_vol, stored_vol)
+            if sampled
+            else detect_volume_anomalies(table, current_vol, stored_vol, history=volume_history)
         )
 
     current_sch = profile_schema(connector, table)
@@ -161,7 +204,7 @@ def inspect_table(
 
     current_fresh = profile_freshness(connector, table)
     stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
-    if stored_fresh:
+    if stored_fresh and CHECK_FRESHNESS not in skip:
         anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))
 
     current_dists: dict[str, dict] = {}
@@ -169,12 +212,14 @@ def inspect_table(
         col_name = col["name"]
         current_dist = profile_distribution(connector, table, col_name)
         current_dists[col_name] = current_dist
-        distribution_history = store.get_profile_history(
-            table,
-            f"distribution:{col_name}",
-            days=None,
-            limit=ADAPTIVE_HISTORY_LIMIT,
-        )
+        distribution_history = None
+        if not sampled:
+            distribution_history = store.get_profile_history(
+                table,
+                f"distribution:{col_name}",
+                days=None,
+                limit=ADAPTIVE_HISTORY_LIMIT,
+            )
         stored_dist = store.get_latest_profile(table, f"distribution:{col_name}")
         if stored_dist:
             anomalies.extend(
@@ -196,6 +241,7 @@ def inspect_table(
                     current_vol,
                     stored_vol,
                     history=distribution_history,
+                    sampled=sampled,
                 )
             )
 
@@ -210,6 +256,15 @@ def inspect_table(
         freshness=current_fresh,
         distributions=current_dists,
     )
+
+
+def _sampled_volume_anomalies(table: str, current_vol: dict, stored_vol: dict) -> list[dict]:
+    """The one volume finding a sample doesn't explain: a table now empty, as a WARNING."""
+    return [
+        {**anomaly, "severity": SAMPLED_EMPTY_TABLE_SEVERITY}
+        for anomaly in detect_volume_anomalies(table, current_vol, stored_vol)
+        if anomaly["type"] == TABLE_EMPTY
+    ]
 
 
 def has_baseline(store: ProfileStore, table: str) -> bool:
@@ -242,12 +297,16 @@ class VerificationResult:
 
     Plain data for the CLI (text or JSON) and the MCP server to render.
     ``tables_without_baseline`` are profiled but never counted as verified.
+    ``against`` is the scope the baseline came from when it is not the
+    connection's own, and ``ignored`` the checks left out.
     """
 
     fail_on: str
     tables_verified: list[str] = field(default_factory=list)
     tables_without_baseline: list[str] = field(default_factory=list)
     anomalies: list[dict] = field(default_factory=list)
+    against: str | None = None
+    ignored: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -263,6 +322,9 @@ class VerificationResult:
         return {
             "passed": self.passed,
             "fail_on": self.fail_on,
+            # Named as in the run record.
+            RUN_AGAINST_KEY: self.against,
+            RUN_IGNORED_KEY: list(self.ignored),
             TABLES_VERIFIED_KEY: list(self.tables_verified),
             TABLES_WITHOUT_BASELINE_KEY: list(self.tables_without_baseline),
             "anomaly_count": len(self.anomalies),
@@ -276,6 +338,9 @@ def verify_tables(
     store: ProfileStore,
     tables: list[str] | None = None,
     fail_on: str = FAIL_ON_CRITICAL,
+    *,
+    against: str | None = None,
+    ignore: Iterable[str] | None = None,
 ) -> VerificationResult:
     """Compare tables with their stored baseline and decide the gate. Saves nothing.
 
@@ -286,18 +351,90 @@ def verify_tables(
     built, so its WARNING new-table findings (empty table, all-NULL column,
     duplicate key) count as CRITICAL. Running this twice on the same data
     returns the same result.
+
+    ``against`` is the scope of another database (see ``against_scope``) whose
+    baseline the connection's tables are compared with, and ``store`` must
+    then be ``open_baseline_store(..., against)``; freshness is not compared.
+    It raises ``AgainstScopeError`` when the store has no baseline for that
+    scope, so a mistyped scope can't pass with nothing verified, or when it
+    is the connection's own. ``ignore`` names checks to leave out, from
+    ``IGNORABLE_CHECKS`` (see ``inspect_table``).
     """
-    result = VerificationResult(fail_on=normalize_fail_on(fail_on))
+    result = VerificationResult(
+        fail_on=normalize_fail_on(fail_on), against=against, ignored=normalize_ignore(ignore)
+    )
+    skip = set(result.ignored)
+    if against is not None:
+        _check_against(connector, store, against)
+        skip |= AGAINST_SKIPPED_CHECKS
     for table in select_tables(tables, connector.list_tables()):
         if has_baseline(store, table):
             result.tables_verified.append(table)
         else:
             result.tables_without_baseline.append(table)
-        anomalies, _ = profile_and_detect(connector, store, table, persist=False)
+        anomalies, _ = inspect_table(connector, store, table, skip=skip)
         if tables:
             anomalies = escalate_new_table_anomalies(anomalies)
         result.anomalies.extend(anomalies)
     return result
+
+
+def normalize_ignore(checks: Iterable[str] | None) -> list[str]:
+    """The checks to leave out, lower-cased, sorted and named once.
+
+    Raises ValueError on a name not in ``IGNORABLE_CHECKS``, before any work.
+    """
+    normalized = sorted({check.strip().lower() for check in checks or ()})
+    unknown = [check for check in normalized if check not in IGNORABLE_CHECKS]
+    if unknown:
+        choices = " or ".join(f"'{check}'" for check in IGNORABLE_CHECKS)
+        raise ValueError(f"Unknown check to ignore: {unknown}. Use {choices}.")
+    return normalized
+
+
+def against_scope(against: str) -> str:
+    """The scope of the database whose baseline `verify --against` compares with.
+
+    ``against`` is a scope (``connection_scope`` returns one unchanged) or a
+    connection string, whose credentials are dropped. Raises ValueError when
+    it names no database; the message never repeats the value, which may hold
+    a password.
+    """
+    scope = connection_scope(against.strip())
+    if not scope:
+        raise ValueError(
+            "The database to compare with must be a scope or a connection string, "
+            f"such as {AGAINST_EXAMPLE}."
+        )
+    return scope
+
+
+def open_baseline_store(connection_string: str | None, against: str | None = None) -> ProfileStore:
+    """Open the store a verification reads its baseline from.
+
+    By default, the connection's own scope plus the unscoped records older
+    releases wrote. With ``against``, that scope's records alone: an unscoped
+    record could have come from any database, the one being verified
+    included, so it can't stand for the other one.
+    """
+    if against is None:
+        return ProfileStore(scope=connection_scope(connection_string))
+    return ProfileStore(scope=against, include_unscoped=False)
+
+
+def _check_against(connector: BaseConnector, store: ProfileStore, against: str) -> None:
+    """Refuse a comparison that would verify nothing, before any table is profiled."""
+    if against == connection_scope(connector.connection_string):
+        raise AgainstScopeError(
+            f"{against} is the database being verified. Point the connection at the "
+            "copy to check and compare it with the other database."
+        )
+    if not store.has_profiles():
+        raise AgainstScopeError(
+            f"No baseline for {against} in this store. Profile that database first "
+            "(scherlok watch, ci or investigate with its connection and the same store), "
+            "or pass its connection string so the scope is spelled the way runs save it."
+        )
 
 
 def redact_connection(connection_string: str) -> str:

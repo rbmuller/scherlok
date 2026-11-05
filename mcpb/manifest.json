@@ -69,7 +69,7 @@
     },
     {
       "name": "verify",
-      "description": "Compare tables with the stored baseline and return a pass/fail gate without saving profiles or anomalies"
+      "description": "Compare tables with the stored baseline, or with another database's, and return a pass/fail gate without saving profiles or anomalies"
     },
     {
       "name": "reconcile",

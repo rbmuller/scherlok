@@ -26,6 +26,7 @@ scherlok verify --table orders --table customers  # only these tables
 scherlok verify --fail-on warning                 # exit 1 on WARNING or worse
 scherlok verify --output json                     # one JSON object on stdout
 scherlok verify --record scherlok-runs.jsonl      # also append the run record to a file
+scherlok verify --against postgresql://db.example.com/shop --ignore volume  # a dev build vs production
 ```
 
 - **Never changes the baseline.** No profiles, no anomalies and no config are saved. The connection comes from `SCHERLOK_CONNECTION` or a previous `scherlok connect` and is never saved. Only the run itself is recorded; see [Run records](#run-records).
@@ -51,12 +52,14 @@ Keep the baseline learning elsewhere, for example `scherlok watch --schedule` or
     path: scherlok-runs.jsonl
 ```
 
-With `--output json`, stdout carries a single object. Rich output goes to stderr: errors, plus a one-line verdict when the gate fails, so the CI log says why the step failed even when stdout goes to a file.
+With `--output json`, stdout carries a single object. Rich output goes to stderr: errors, plus a one-line verdict when the gate fails, so the CI log says why the step failed even when stdout goes to a file. `against` and `ignored` are set by the options of [Compare a build with production](#compare-a-build-with-production-verify-against).
 
 ```json
 {
   "passed": false,
   "fail_on": "critical",
+  "against": null,
+  "ignored": [],
   "tables_verified": ["orders"],
   "tables_without_baseline": ["refunds"],
   "anomaly_count": 1,
@@ -80,7 +83,7 @@ With `--output json`, stdout carries a single object. Rich output goes to stderr
 }
 ```
 
-Agents get the same gate as the read-only MCP tool `verify(tables, fail_on)`; see [MCP server](mcp.md).
+Agents get the same gate as the read-only MCP tool `verify(tables, fail_on, against, ignore)`; see [MCP server](mcp.md).
 
 ### Structured anomaly fields
 
@@ -111,10 +114,90 @@ Each anomaly a run saves carries the run's `run_id`, which `scherlok history --o
 `verify` writes its record to the local store, and never uploads a remote store. On a CI runner that local copy is gone when the job ends, so pass `--record PATH`: it appends the same record as one JSON line, and the file can be kept as a build artifact, as in the workflow above. A record that can't be written exits 1.
 
 ```json
-{"run_id": "3f9c2a7e5b1d4c8e9a0f6b2d7c4e1a58", "command": "verify", "scope": "postgresql://db.example.com/shop", "scherlok_version": "X.Y.Z", "tables": ["orders", "refunds"], "passed": false, "fail_on": "critical", "critical": 1, "warning": 0, "info": 0, "started_at": "2026-11-04T09:15:02.418310+00:00", "finished_at": "2026-11-04T09:15:03.902114+00:00"}
+{"run_id": "3f9c2a7e5b1d4c8e9a0f6b2d7c4e1a58", "command": "verify", "scope": "postgresql://db.example.com/shop", "scherlok_version": "X.Y.Z", "tables": ["orders", "refunds"], "passed": false, "fail_on": "critical", "critical": 1, "warning": 0, "info": 0, "started_at": "2026-11-04T09:15:02.418310+00:00", "finished_at": "2026-11-04T09:15:03.902114+00:00", "against": null, "ignored": []}
 ```
 
-`command` is `watch`, `ci`, `check`, `verify`, or `mcp:` followed by the tool name. `fail_on` is the gate the run was judged by; `watch` has no `--fail-on` and is judged on CRITICAL, as its exit code is. `investigate`, `dbt` and `dbt-run-and-watch` runs are not recorded.
+`command` is `watch`, `ci`, `check`, `verify`, or `mcp:` followed by the tool name. `fail_on` is the gate the run was judged by; `watch` has no `--fail-on` and is judged on CRITICAL, as its exit code is. `against` is the scope a `verify --against` run took its baseline from (`scope` stays the database it checked), and `ignored` lists the checks `--ignore` left out; other runs, and runs recorded before these fields existed, have `null` and `[]`. `investigate`, `dbt` and `dbt-run-and-watch` runs are not recorded.
+
+## Compare a build with production: `verify --against`
+
+Agents and developers usually build in a dev schema or database first, and that is the time to catch a dropped column, before the change is published. `verify --against` compares the tables of the connection, the build, with the baseline another database left in the same store, production's, and saves nothing under either:
+
+```bash
+# Production learns its baseline as usual, e.g. a scheduled watch on a shared store.
+SCHERLOK_CONNECTION="$PROD_DATABASE_URL" scherlok watch
+
+# The build, compared with production's baseline.
+export SCHERLOK_CONNECTION="$CI_DATABASE_URL"   # e.g. postgresql://ci:...@db.example.com/shop_ci
+scherlok verify --against postgresql://db.example.com/shop --ignore volume
+```
+
+- **`--against` names production by its [scope](getting-started.md#where-things-live)**: the adapter, host, port and path of its connection string, never credentials. A connection string is accepted too and reduced to its scope; it is never saved or printed, but a scope keeps credentials out of the command line. On Snowflake and BigQuery the schema or dataset is part of the scope (`snowflake://my-account/SHOP/DBT_CI` against `snowflake://my-account/SHOP/PUBLIC`); on PostgreSQL, where Scherlok reads the `public` schema, the build goes to another database such as `shop_ci`.
+- **One store for both.** Production's baseline must be in the store the build is verified with: the same local `~/.scherlok`, or the same `--store`/`SCHERLOK_STORE` bucket, which `verify` downloads and never uploads.
+- **Only production's own records count.** Records saved before scopes existed are skipped: they could have come from any database, the build included. After upgrading, let production run `watch`, `ci` or `investigate` once before the first `--against`.
+- **A scope with no baseline fails** with exit 1 instead of passing with nothing verified, so a typo can't open the gate. Naming the database being verified fails too.
+- **Tables new in the build** are listed under `tables_without_baseline` and get the new-table checks; with `--table` they count as just built, as without `--against`.
+- **Freshness is not compared**: the build was updated when it was built, not on production's schedule.
+- Schema, NULL rates, means and cardinality are compared as in any `verify`, and the run is recorded under the build's scope with `against` set.
+
+### Builds on sampled data: `--ignore volume`
+
+A dev build often runs on a sample (a date window, one tenant, a `LIMIT`), so its row counts sit far below production's, and so do the distinct counts of most columns. `--ignore volume` compares only what a sample can't explain:
+
+- **Row counts** are not compared (`volume_drop`, `volume_spike`). A table with rows in the baseline and none now is still reported, as a `table_empty` WARNING: a sample can miss a sparse table, but a broken join empties one too.
+- **Cardinality** compares the distinct ratio of near-unique columns, so duplicates in an `id` are still caught, and flags a column with 50% more distinct values than the baseline or more, since a sample can only lose values. Fewer distinct values pass.
+- **NULL rates and means** are compared with the latest baseline profile rather than the spread learned from its history, which is the full table's run-to-run variation and far tighter than a sample's error. A NULL rate 10 points off, or a mean more than 3 standard deviations off, is still reported.
+- **Schema** checks are unchanged: a dropped column or a changed type is CRITICAL.
+
+`--ignore volume` also works without `--against`.
+
+A pull-request job that builds dbt models in a CI database and compares them with production:
+
+```yaml
+- name: Build the change
+  run: dbt build --target ci   # writes to shop_ci
+- name: Compare with production
+  env:
+    SCHERLOK_CONNECTION: ${{ secrets.CI_DATABASE_URL }}  # the shop_ci database
+    SCHERLOK_STORE: s3://my-bucket/scherlok/profiles.db  # where production's watch saves its baseline
+  run: |
+    pip install scherlok
+    scherlok verify --against postgresql://db.example.com/shop --ignore volume \
+      --output json --record scherlok-runs.jsonl > scherlok-verify.json
+```
+
+A dropped column fails the step:
+
+```json
+{
+  "passed": false,
+  "fail_on": "critical",
+  "against": "postgresql://db.example.com/shop",
+  "ignored": ["volume"],
+  "tables_verified": ["orders"],
+  "tables_without_baseline": [],
+  "anomaly_count": 1,
+  "info": 0,
+  "warning": 0,
+  "critical": 1,
+  "anomalies": [
+    {
+      "table": "orders",
+      "type": "column_removed",
+      "severity": "CRITICAL",
+      "message": "Column 'email' was removed",
+      "column": "email",
+      "metric": "column_type",
+      "baseline": "character varying",
+      "current": null,
+      "change_pct": null,
+      "hint": "A column was dropped or renamed; restore it or update every query that still reads it."
+    }
+  ]
+}
+```
+
+Agents get the same comparison from the MCP tool `verify(tables, fail_on, against, ignore)`, which takes a scope only, never a connection string.
 
 ## Accepting a change from CI
 

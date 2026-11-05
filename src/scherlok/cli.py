@@ -73,10 +73,15 @@ from scherlok.runs import (
     append_run_record,
 )
 from scherlok.service import (
+    AGAINST_EXAMPLE,
+    AgainstScopeError,
     UnknownTablesError,
     VerificationResult,
+    against_scope,
     blocks_baseline,
     connection_scope,
+    normalize_ignore,
+    open_baseline_store,
     profile_and_detect,
     select_tables,
     severity_counts,
@@ -169,6 +174,29 @@ def _fail_on_or_exit(fail_on: str) -> str:
     except ValueError as exc:
         choices = " or ".join(f"'{choice}'" for choice in FAIL_ON_CHOICES)
         out_error(f"[red]Invalid --fail-on value '{rich_escape(fail_on)}'. Use {choices}.[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+def _against_or_exit(against: str | None) -> str | None:
+    """The scope --against names, or exit 1 before any work.
+
+    The value is never printed: it may be a connection string with a password.
+    """
+    if against is None:
+        return None
+    try:
+        return against_scope(against)
+    except ValueError as exc:
+        out_error(f"[red]Invalid --against value. {rich_escape(str(exc))}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+def _ignore_or_exit(ignore: list[str] | None) -> list[str]:
+    """The checks --ignore names, normalized, or exit 1 before any work."""
+    try:
+        return normalize_ignore(ignore)
+    except ValueError as exc:
+        out_error(f"[red]Invalid --ignore value. {rich_escape(str(exc))}[/red]")
         raise typer.Exit(code=1) from exc
 
 
@@ -704,7 +732,12 @@ def check(
 
 
 def _run_verify(
-    tables: list[str] | None, fail_on: str, record_path: Path | None = None
+    tables: list[str] | None,
+    fail_on: str,
+    record_path: Path | None = None,
+    *,
+    against: str | None = None,
+    ignore: list[str] | None = None,
 ) -> VerificationResult:
     """Verify tables against the stored baseline without changing it.
 
@@ -712,19 +745,29 @@ def _run_verify(
     in the local store, and appended to `record_path` as one JSON line when
     given. A remote store is downloaded but never uploaded back, so with one
     the record file is the only copy of the run that outlives the job.
+    With `against` (a scope) the baseline is that database's; the run is
+    still recorded under the connection's scope, noting `against`.
     """
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB, upload_on_exit=False):
-        store = _open_store(connector.connection_string)
-        run = RunRecord(command=COMMAND_VERIFY, scope=store.scope, fail_on=fail_on)
+        store = open_baseline_store(connector.connection_string, against)
+        run = RunRecord(
+            command=COMMAND_VERIFY,
+            scope=connection_scope(connector.connection_string),
+            fail_on=fail_on,
+            against=against,
+            ignored=list(ignore or []),
+        )
         try:
-            result = verify_tables(connector, store, tables, fail_on)
+            result = verify_tables(
+                connector, store, tables, fail_on, against=against, ignore=ignore
+            )
             record = run.finish(result.tables_checked, result.anomalies).to_dict()
             store.save_run(record)
-        except UnknownTablesError as exc:
+        except (UnknownTablesError, AgainstScopeError) as exc:
             out_error(f"[red]{rich_escape(str(exc))}[/red]")
             raise typer.Exit(code=1) from exc
         finally:
@@ -747,16 +790,26 @@ def _print_verification(result: VerificationResult) -> None:
     if result.anomalies and not is_quiet():
         print_anomalies(result.anomalies)
     missing = result.tables_without_baseline
-    if missing:
+    against = rich_escape(result.against) if result.against else None
+    if missing and against:
+        out_info(
+            f"[yellow]Not verified, no baseline in {against} ({len(missing)}): "
+            f"{_table_preview(missing)}. Only the new-table checks ran on them.[/yellow]"
+        )
+    elif missing:
         out_info(
             f"[yellow]Not verified, no baseline yet ({len(missing)}): {_table_preview(missing)}. "
             "Once the data is right, run [bold]scherlok investigate[/bold] to set one.[/yellow]"
         )
     counts = severity_counts(result.anomalies)
     severities = ", ".join(f"{count} {name}" for name, count in reversed(counts.items()))
+    compared = f" against {against}" if against else ""
+    flags = ", ".join(
+        [f"--fail-on {result.fail_on}", *(f"--ignore {check}" for check in result.ignored)]
+    )
     summary = (
-        f"{len(result.tables_verified)} verified, {len(missing)} without baseline, "
-        f"{severities} (--fail-on {result.fail_on}). No profiles or anomalies were saved."
+        f"{len(result.tables_verified)} verified{compared}, {len(missing)} without baseline, "
+        f"{severities} ({flags}). No profiles or anomalies were saved."
     )
     if result.passed:
         out_info(f"[green]Verify passed:[/green] {summary}")
@@ -782,6 +835,16 @@ def verify(
         None, "--record", dir_okay=False,
         help="Also append this run's record to PATH as one JSON line, e.g. a CI artifact.",
     ),
+    against: str | None = typer.Option(
+        None, "--against",
+        help="Compare with another database's baseline, e.g. production's: its scope "
+        f"({AGAINST_EXAMPLE}) or connection string. Saves nothing to either.",
+    ),
+    ignore: list[str] = typer.Option(
+        None, "--ignore",
+        help="Leave a check out: 'volume' for a build on sampled data (row counts are "
+        "not compared, and column checks allow for a sample).",
+    ),
 ) -> None:
     """Compare tables with the stored baseline without changing it.
 
@@ -795,10 +858,15 @@ def verify(
     local store (`scherlok history --runs`); `--record` also appends it to a
     file, which survives a CI job when the store is remote.
 
+    --against compares the connection's tables, e.g. a staging build, with
+    the baseline another database left in the same store, e.g. production's.
+    Only that database's own records count, and freshness is not compared.
+
     Example:
         scherlok verify
         scherlok verify --table orders --table customers --fail-on warning
         scherlok verify --output json --record scherlok-runs.jsonl
+        scherlok verify --against postgresql://db.example.com/shop --ignore volume
     """
     output_lower = output.lower()
     if output_lower not in OUTPUT_FORMATS:
@@ -806,6 +874,8 @@ def verify(
         raise typer.Exit(code=1)
     json_mode = output_lower == OUTPUT_JSON
     fail_on = _fail_on_or_exit(fail_on)
+    against = _against_or_exit(against)
+    ignore = _ignore_or_exit(ignore)
 
     from scherlok.output import set_stderr, set_verbosity
 
@@ -817,7 +887,7 @@ def verify(
         set_verbosity(quiet=True)
 
     try:
-        result = _run_verify(table or None, fail_on, record)
+        result = _run_verify(table or None, fail_on, record, against=against, ignore=ignore)
         if json_mode:
             print(json.dumps(result.to_dict()))
         # Under the forced quiet of JSON mode only a failed verdict gets

@@ -25,13 +25,17 @@ from scherlok.store.sqlite import (
     CREATE_TABLE_SQL,
     MIGRATIONS,
     RAW_VALUE_KEYS,
+    RUN_AGAINST_KEY,
     RUN_COLUMNS,
     RUN_ID_COLUMN,
+    RUN_IGNORED_KEY,
+    RUN_LIST_COLUMNS,
     SCOPE_COLUMN,
     SCOPED_TABLES,
     ProfileStore,
     _add_anomaly_details_column,
     _add_baseline_approvals,
+    _add_run_comparison_columns,
     _add_runs,
     _add_scope_columns,
     _strip_raw_distribution_values,
@@ -43,6 +47,8 @@ SCOPELESS_VERSION = MIGRATIONS.index(_add_scope_columns)
 STAGING_SCOPE = "postgresql://staging.example.com/shop"
 PRODUCTION_SCOPE = "postgresql://prod.example.com/shop"
 RUNS_TABLE = "runs"
+# The run columns of the releases before #110, all an older runner inserts.
+OLD_RUN_COLUMNS = RUN_COLUMNS[: RUN_COLUMNS.index(RUN_AGAINST_KEY)]
 # A store from before anomalies gained a details column (#108): the release
 # with only the #114 migration, so every later migration runs on open.
 BEFORE_DETAILS_VERSION = SCOPELESS_VERSION
@@ -483,8 +489,9 @@ def _create_previous_release_store(path: Path) -> None:
     run = RunRecord(command=COMMAND_WATCH, scope=STAGING_SCOPE).finish(["people"], [])
     record = {**run.to_dict(), "tables": json.dumps(run.tables)}
     conn.execute(
-        f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({', '.join('?' * len(RUN_COLUMNS))})",
-        [record[column] for column in RUN_COLUMNS],
+        f"INSERT INTO runs ({', '.join(OLD_RUN_COLUMNS)}) "
+        f"VALUES ({', '.join('?' * len(OLD_RUN_COLUMNS))})",
+        [record[column] for column in OLD_RUN_COLUMNS],
     )
     conn.execute(f"PRAGMA user_version = {BEFORE_APPROVALS_VERSION}")
     conn.commit()
@@ -492,9 +499,11 @@ def _create_previous_release_store(path: Path) -> None:
 
 
 def _table_rows(path: Path, table: str) -> list[tuple]:
+    """Every row of `table`, in the columns the release before #109 wrote."""
+    columns = ", ".join(OLD_RUN_COLUMNS) if table == RUNS_TABLE else "*"
     conn = sqlite3.connect(str(path))
     try:
-        return conn.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+        return conn.execute(f"SELECT {columns} FROM {table} ORDER BY rowid").fetchall()
     finally:
         conn.close()
 
@@ -535,3 +544,94 @@ def test_approvals_migration_is_safe_to_run_twice_and_stays_append_only(tmp_path
             conn.execute(f"DELETE FROM {APPROVALS_TABLE}")
     finally:
         conn.close()
+
+
+# ----- runs.against and runs.ignored (#110) ----------------------------------
+
+BEFORE_RUN_COMPARISON_VERSION = MIGRATIONS.index(_add_run_comparison_columns)
+
+
+def _store_before_run_comparison(path: Path, monkeypatch) -> None:
+    """A store as the release before #110 leaves it: every migration but the last."""
+    _create_old_store(path)
+    with monkeypatch.context() as patched:
+        patched.setattr(store_sqlite, "MIGRATIONS", MIGRATIONS[:BEFORE_RUN_COMPARISON_VERSION])
+        _open_and_close(path)
+
+
+def _insert_run_as_an_older_release(path: Path) -> dict:
+    record = RunRecord(command=COMMAND_WATCH, scope=STAGING_SCOPE).finish(["people"], [])
+    row = {
+        column: json.dumps(value) if column in RUN_LIST_COLUMNS else value
+        for column, value in record.to_dict().items()
+        if column in OLD_RUN_COLUMNS
+    }
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            f"INSERT INTO runs ({', '.join(row)}) VALUES ({', '.join('?' for _ in row)})",
+            list(row.values()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return record.to_dict()
+
+
+def _run_columns(path: Path) -> list[str]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return [row[1] for row in conn.execute("PRAGMA table_info(runs)")]
+    finally:
+        conn.close()
+
+
+def test_runs_saved_before_the_upgrade_read_back_as_comparing_nothing(tmp_path, monkeypatch):
+    path = tmp_path / STORE_FILENAME
+    _store_before_run_comparison(path, monkeypatch)
+    assert _user_version(path) == BEFORE_RUN_COMPARISON_VERSION
+    assert RUN_AGAINST_KEY not in _run_columns(path)
+    old_run = _insert_run_as_an_older_release(path)
+
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    [run] = ProfileStore(db_path=path).get_runs()
+    assert run == old_run
+    assert run[RUN_AGAINST_KEY] is None and run[RUN_IGNORED_KEY] == []
+    assert _profile_rows(path) and _anomalies(path) == [ANOMALY]
+
+
+def test_an_older_runner_can_still_save_runs_after_the_upgrade(tmp_path, monkeypatch):
+    path = tmp_path / STORE_FILENAME
+    _store_before_run_comparison(path, monkeypatch)
+    _open_and_close(path)
+    verify_run = RunRecord(
+        command="verify", scope=STAGING_SCOPE, against=PRODUCTION_SCOPE, ignored=["volume"]
+    ).finish(["people"], [])
+    store = ProfileStore(db_path=path)
+    store.save_run(verify_run.to_dict())
+    store.close()
+
+    older_run = _insert_run_as_an_older_release(path)
+
+    runs = {run["run_id"]: run for run in ProfileStore(db_path=path).get_runs()}
+    assert runs[older_run[RUN_ID_COLUMN]] == older_run
+    assert runs[verify_run.run_id] == verify_run.to_dict()
+
+
+def test_run_comparison_migration_is_safe_to_run_twice(tmp_path, monkeypatch):
+    path = tmp_path / STORE_FILENAME
+    _store_before_run_comparison(path, monkeypatch)
+    _open_and_close(path)
+
+    conn = sqlite3.connect(str(path))
+    _add_run_comparison_columns(conn)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {BEFORE_RUN_COMPARISON_VERSION}")
+    conn.close()
+    _open_and_close(path)
+
+    assert _user_version(path) == LATEST_VERSION
+    columns = _run_columns(path)
+    assert columns.count(RUN_AGAINST_KEY) == 1 and columns.count(RUN_IGNORED_KEY) == 1
