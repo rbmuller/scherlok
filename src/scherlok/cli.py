@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +40,7 @@ from scherlok.approvals import (
 )
 from scherlok.config import BASELINE_LOCKED_SETTING, ENV_BASELINE_LOCKED, ScherlokConfig
 from scherlok.connectors import get_connector
+from scherlok.dbt.manifest import DEFAULT_TARGET_PATH
 from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.fields import anomaly_details
@@ -83,6 +85,7 @@ from scherlok.service import (
     normalize_ignore,
     open_baseline_store,
     profile_and_detect,
+    redact_connection,
     select_tables,
     severity_counts,
     verify_tables,
@@ -100,9 +103,12 @@ OUTPUT_TEXT = "text"
 OUTPUT_JSON = "json"
 OUTPUT_FORMATS = (OUTPUT_TEXT, OUTPUT_JSON)
 
+# `verify --dbt-project --output json`: built models the connection can't see.
+DBT_MODELS_NOT_FOUND_KEY = "dbt_models_not_found"
+
 
 if TYPE_CHECKING:
-    from scherlok.dbt.manifest import DbtExposure
+    from scherlok.dbt.manifest import DbtExposure, DbtNode
 
 
 app = typer.Typer(
@@ -272,16 +278,39 @@ def config(
         help="Locked: only `scherlok accept` writes baselines; watch, ci, check, dbt "
         "and the MCP tools compare without saving profiles.",
     ),
+    output: str = typer.Option(
+        OUTPUT_TEXT, "--output",
+        help="Output format: 'text' (default) or 'json' (one object on stdout, "
+        "never the connection string)",
+    ),
 ) -> None:
     """Configure Scherlok settings.
+
+    With no option, show them. `--output json` prints whether a connection is
+    configured and where it comes from, never the connection string itself,
+    so a script or an agent hook can check the setup without reading
+    ~/.scherlok/config.json.
 
     Example:
         scherlok config --store s3://my-bucket/scherlok/profiles.db
         scherlok config --store gs://my-bucket/scherlok/profiles.db
         scherlok config --store az://my-container/scherlok/profiles.db
         scherlok config --baseline-locked
+        scherlok config --output json
     """
+    output_lower = output.lower()
+    if output_lower not in OUTPUT_FORMATS:
+        out_error(
+            f"[red]Invalid --output value '{rich_escape(output)}'. Use 'text' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=1)
     cfg = ScherlokConfig.load()
+    if output_lower == OUTPUT_JSON:
+        if store is not None or baseline_locked is not None:
+            out_error("[red]--output json only shows the settings; it can't change them.[/red]")
+            raise typer.Exit(code=1)
+        print(json.dumps(_config_summary(cfg)))
+        return
     if store is None and baseline_locked is None:
         current = cfg.settings.get("store") or "local (~/.scherlok/)"
         console.print(f"Current store: [cyan]{current}[/cyan]")
@@ -306,6 +335,18 @@ def config(
             console.print(
                 f"[yellow]{ENV_BASELINE_LOCKED} still locks them in this environment.[/yellow]"
             )
+
+
+def _config_summary(cfg: ScherlokConfig) -> dict:
+    """`config --output json`: what is set up, never the connection string itself."""
+    source = cfg.connection_source()
+    store = cfg.get_store()
+    return {
+        "connection_configured": source is not None,
+        "connection_source": source,
+        "store": redact_connection(store) if store else None,
+        BASELINE_LOCKED_SETTING: cfg.baseline_locked(),
+    }
 
 
 def _exit_if_baseline_locked(cfg: ScherlokConfig) -> None:
@@ -731,10 +772,60 @@ def check(
     _run_ci(connection_string, webhook, email, fail_on, explain, command=COMMAND_CHECK)
 
 
+@dataclass
+class DbtScope:
+    """The models a dbt run built, for `verify --dbt-project`.
+
+    `resolve` maps them to the tables the connection can see, the way
+    `dbt-run-and-watch` does; a model it can't find lands in `not_found`.
+    """
+
+    project_dir: Path
+    models: list[DbtNode]
+    tables: list[str] = field(default_factory=list)
+    not_found: list[str] = field(default_factory=list)
+
+    def resolve(self, visible: set[str]) -> None:
+        for node in self.models:
+            physical = _resolve_physical_table(node, visible)
+            if physical is None:
+                self.not_found.append(node.name)
+            else:
+                self.tables.append(physical)
+
+
+def _dbt_scope_or_exit(project_dir: Path, target_path: str) -> DbtScope:
+    """Read the models that succeeded in the project's last dbt run, or exit 1."""
+    from scherlok.dbt import built_models
+
+    try:
+        models = built_models(project_dir, target_path=target_path)
+    except (OSError, ValueError) as exc:
+        out_error(f"[red]{rich_escape(str(exc))}[/red]")
+        raise typer.Exit(code=1) from exc
+    return DbtScope(project_dir=project_dir, models=models)
+
+
+def _print_dbt_scope(scope: DbtScope) -> None:
+    """Say which dbt models `verify --dbt-project` could not check."""
+    if not scope.models:
+        project = rich_escape(str(scope.project_dir))
+        out_info(
+            f"[yellow]No model succeeded in the last dbt run in {project}; "
+            "nothing to verify from it.[/yellow]"
+        )
+    if scope.not_found:
+        out_info(
+            f"[yellow]dbt models not on this connection, not verified ({len(scope.not_found)}): "
+            f"{_table_preview(scope.not_found)}.[/yellow]"
+        )
+
+
 def _run_verify(
     tables: list[str] | None,
     fail_on: str,
     record_path: Path | None = None,
+    dbt_scope: DbtScope | None = None,
     *,
     against: str | None = None,
     ignore: list[str] | None = None,
@@ -747,9 +838,18 @@ def _run_verify(
     the record file is the only copy of the run that outlives the job.
     With `against` (a scope) the baseline is that database's; the run is
     still recorded under the connection's scope, noting `against`.
+
+    `tables=None` verifies every table. With `dbt_scope`, the tables its
+    models resolve to are added to `tables`, and when that leaves none,
+    nothing is verified: a dbt run that built nothing must not check the
+    whole warehouse.
     """
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
+    if dbt_scope is not None:
+        dbt_scope.resolve(set(connector.list_tables()))
+        tables = [*(tables or []), *dbt_scope.tables]
+    nothing_to_verify = tables is not None and not tables
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB, upload_on_exit=False):
@@ -762,8 +862,14 @@ def _run_verify(
             ignored=list(ignore or []),
         )
         try:
-            result = verify_tables(
-                connector, store, tables, fail_on, against=against, ignore=ignore
+            result = (
+                VerificationResult(
+                    fail_on=fail_on, against=against, ignored=normalize_ignore(ignore)
+                )
+                if nothing_to_verify
+                else verify_tables(
+                    connector, store, tables, fail_on, against=against, ignore=ignore
+                )
             )
             record = run.finish(result.tables_checked, result.anomalies).to_dict()
             store.save_run(record)
@@ -845,6 +951,15 @@ def verify(
         help="Leave a check out: 'volume' for a build on sampled data (row counts are "
         "not compared, and column checks allow for a sample).",
     ),
+    dbt_project: Path | None = typer.Option(
+        None, "--dbt-project",
+        help="Verify the models that succeeded in this dbt project's last run "
+        "(run_results.json and manifest.json) instead of every table.",
+    ),
+    dbt_target_path: str = typer.Option(
+        DEFAULT_TARGET_PATH, "--dbt-target-path",
+        help="dbt's target directory, relative to --dbt-project unless absolute.",
+    ),
 ) -> None:
     """Compare tables with the stored baseline without changing it.
 
@@ -861,12 +976,18 @@ def verify(
     --against compares the connection's tables, e.g. a staging build, with
     the baseline another database left in the same store, e.g. production's.
     Only that database's own records count, and freshness is not compared.
+    `--dbt-project` scopes the run to what dbt just built: the models that
+    succeeded in the last run_results.json, matched to tables by name, count
+    as just built like --table, and --table adds to them. A model the
+    connection can't see is listed under `dbt_models_not_found` in the JSON;
+    when no model succeeded, nothing is verified.
 
     Example:
         scherlok verify
         scherlok verify --table orders --table customers --fail-on warning
         scherlok verify --output json --record scherlok-runs.jsonl
         scherlok verify --against postgresql://db.example.com/shop --ignore volume
+        scherlok verify --dbt-project . --output json
     """
     output_lower = output.lower()
     if output_lower not in OUTPUT_FORMATS:
@@ -887,9 +1008,19 @@ def verify(
         set_verbosity(quiet=True)
 
     try:
-        result = _run_verify(table or None, fail_on, record, against=against, ignore=ignore)
+        dbt_scope = (
+            _dbt_scope_or_exit(dbt_project, dbt_target_path) if dbt_project is not None else None
+        )
+        result = _run_verify(
+            table or None, fail_on, record, dbt_scope, against=against, ignore=ignore
+        )
         if json_mode:
-            print(json.dumps(result.to_dict()))
+            payload = result.to_dict()
+            if dbt_scope is not None:
+                payload[DBT_MODELS_NOT_FOUND_KEY] = dbt_scope.not_found
+            print(json.dumps(payload))
+        if dbt_scope is not None:
+            _print_dbt_scope(dbt_scope)
         # Under the forced quiet of JSON mode only a failed verdict gets
         # through, on stderr, so a CI log still says why the step failed.
         _print_verification(result)
@@ -1304,7 +1435,6 @@ def _dbt_impl(
     flag parsing; this function does the work."""
 
     from scherlok.dbt import (
-        DbtNode,
         ProfileResolutionError,
         build_dependency_graph,
         discover_exposures,

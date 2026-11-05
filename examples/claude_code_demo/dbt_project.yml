@@ -1,0 +1,12 @@
+name: claude_code_demo
+version: '1.0.0'
+profile: claude_code_demo
+config-version: 2
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+
+models:
+  claude_code_demo:
+    +materialized: table

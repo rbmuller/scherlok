@@ -9,6 +9,9 @@ from pathlib import Path
 MIN_MANIFEST_VERSION = 10  # dbt 1.6+
 MATERIALIZED_PHYSICAL = {"table", "incremental", "view", "materialized_view"}
 SUPPORTED_ADAPTERS = {"postgres", "bigquery", "snowflake"}
+# dbt writes its artifacts here, relative to the project root, unless told
+# otherwise by `--target-path`, DBT_TARGET_PATH or `target-path`.
+DEFAULT_TARGET_PATH = "target"
 
 
 @dataclass(frozen=True)
@@ -43,18 +46,28 @@ class DbtExposure:
         return self.label or self.name
 
 
-def load_manifest(project_dir: str | Path) -> dict:
+def load_manifest(
+    project_dir: str | Path,
+    *,
+    target_path: str | Path = DEFAULT_TARGET_PATH,
+    check_adapter: bool = True,
+) -> dict:
     """Load and validate target/manifest.json from a dbt project directory.
 
     Args:
         project_dir: Path to the dbt project root (must contain target/manifest.json).
+        target_path: dbt's target directory, relative to ``project_dir`` unless
+            absolute, as dbt resolves it.
+        check_adapter: Reject adapters whose profiles.yml Scherlok can't
+            resolve. Callers that take the connection from elsewhere, such
+            as ``scherlok verify``, pass False.
 
     Raises:
         FileNotFoundError: When manifest.json is missing.
         ValueError: When manifest_version is too old or adapter is unsupported.
     """
     project_path = Path(project_dir)
-    manifest_path = project_path / "target" / "manifest.json"
+    manifest_path = project_path / target_path / "manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError(
             f"manifest.json not found at {manifest_path}. "
@@ -73,7 +86,7 @@ def load_manifest(project_dir: str | Path) -> dict:
         )
 
     adapter = manifest.get("metadata", {}).get("adapter_type")
-    if adapter and adapter not in SUPPORTED_ADAPTERS:
+    if check_adapter and adapter and adapter not in SUPPORTED_ADAPTERS:
         raise ValueError(
             f"Unsupported dbt adapter '{adapter}'. "
             f"Supported: {sorted(SUPPORTED_ADAPTERS)}. "

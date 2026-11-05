@@ -1,0 +1,20 @@
+{
+  "description": "After `dbt run` or `dbt build`, run the read-only `scherlok verify` gate on the models the run built and hand the findings to Claude. Silent when Scherlok isn't installed or configured.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(*dbt *)",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/verify_after_dbt.py"],
+            "timeout": 180,
+            "statusMessage": "Scherlok: checking the data"
+          }
+        ]
+      }
+    ]
+  }
+}

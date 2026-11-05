@@ -23,6 +23,7 @@ scherlok ci "$DATABASE_URL" --webhook "$SLACK_WEBHOOK" --fail-on critical
 ```bash
 scherlok verify                                   # every table, exit 1 on CRITICAL
 scherlok verify --table orders --table customers  # only these tables
+scherlok verify --dbt-project .                   # only the models the last dbt run built
 scherlok verify --fail-on warning                 # exit 1 on WARNING or worse
 scherlok verify --output json                     # one JSON object on stdout
 scherlok verify --record scherlok-runs.jsonl      # also append the run record to a file
@@ -32,7 +33,8 @@ scherlok verify --against postgresql://db.example.com/shop --ignore volume  # a 
 - **Never changes the baseline.** No profiles, no anomalies and no config are saved. The connection comes from `SCHERLOK_CONNECTION` or a previous `scherlok connect` and is never saved. Only the run itself is recorded; see [Run records](#run-records).
 - **Never uploads a remote store.** With `--store` or `SCHERLOK_STORE` set, the store is downloaded and never uploaded back, so parallel jobs running `verify` can't overwrite each other or a concurrent `ci` run.
 - **Tables without a baseline** are listed under `tables_without_baseline` and never counted as verified. They get only the new-table checks, as WARNING (INFO for a constant column). Tables you name with `--table` count as just built, so an empty table, a column NULL in every row or a duplicate key there is CRITICAL and fails the default gate: `scherlok verify --table new_orders` right after creating it. Once the data is right, run `scherlok investigate` (or let a scheduled `watch` run) to give them a baseline.
-- **Exit code:** 1 when an anomaly reaches `--fail-on` (`critical` by default), or on an error such as a missing connection, an unknown `--table` or an invalid flag; 0 otherwise.
+- **Scoped to a dbt run** with `--dbt-project DIR`: the models that succeeded in the last `run_results.json`, matched to tables through `manifest.json`, count as just built like `--table`. Models the connection can't see are listed under `dbt_models_not_found`; a run that built nothing verifies nothing. See [Scope a check to a dbt run](agents.md#scope-a-check-to-a-dbt-run).
+- **Exit code:** 1 when an anomaly reaches `--fail-on` (`critical` by default), or on an error such as a missing connection, an unknown `--table`, missing dbt artifacts or an invalid flag; 0 otherwise.
 
 Keep the baseline learning elsewhere, for example `scherlok watch --schedule` or `scherlok ci` on your main branch, and gate changes with `verify`:
 

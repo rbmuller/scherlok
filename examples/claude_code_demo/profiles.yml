@@ -1,0 +1,9 @@
+# A local DuckDB file next to this project: no server, no credentials.
+claude_code_demo:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: demo.duckdb
+      schema: main
+      threads: 1

@@ -6,10 +6,23 @@ import json
 from pathlib import Path
 from typing import Any
 
+from scherlok.dbt.manifest import (
+    DEFAULT_TARGET_PATH,
+    DbtNode,
+    discover_models,
+    load_manifest,
+)
 
-def load_run_results(project_dir: str | Path) -> dict[str, Any]:
-    """Load and validate target/run_results.json from a dbt project."""
-    run_results_path = Path(project_dir) / "target" / "run_results.json"
+
+def load_run_results(
+    project_dir: str | Path, *, target_path: str | Path = DEFAULT_TARGET_PATH
+) -> dict[str, Any]:
+    """Load and validate target/run_results.json from a dbt project.
+
+    ``target_path`` is dbt's target directory, relative to ``project_dir``
+    unless absolute.
+    """
+    run_results_path = Path(project_dir) / target_path / "run_results.json"
     if not run_results_path.is_file():
         raise FileNotFoundError(
             f"run_results.json not found at {run_results_path}. "
@@ -43,6 +56,24 @@ def successful_model_unique_ids_from_results(
         if result["status"] == "success"
         and result["unique_id"].startswith("model.")
     }
+
+
+def built_models(
+    project_dir: str | Path, *, target_path: str | Path = DEFAULT_TARGET_PATH
+) -> list[DbtNode]:
+    """The materialized models that succeeded in the project's last dbt invocation.
+
+    The same join as `dbt-run-and-watch`: run_results.json says which model
+    nodes succeeded, manifest.json what each one is called. The adapter is not
+    checked, because the caller brings its own connection rather than
+    resolving profiles.yml. Raises like `load_manifest` and `load_run_results`
+    when an artifact is missing or malformed.
+    """
+    manifest = load_manifest(project_dir, target_path=target_path, check_adapter=False)
+    succeeded = successful_model_unique_ids(
+        load_run_results(project_dir, target_path=target_path)
+    )
+    return [node for node in discover_models(manifest) if node.unique_id in succeeded]
 
 
 def _validated_results(run_results: object) -> list[dict[str, Any]]:

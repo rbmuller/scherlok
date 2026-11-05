@@ -59,6 +59,7 @@ nav:
   - Alerts: alerts.md
   - HTML dashboard: dashboard.md
   - MCP server: mcp.md
+  - Coding agents: agents.md
   - AI-explained alerts: explain.md
   - Comparison: comparison.md
   - Contributing: contributing.md

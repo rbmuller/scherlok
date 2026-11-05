@@ -18,7 +18,7 @@ cd scherlok
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"      # base + tests + lint
 pip install -e ".[dbt]"      # if you'll touch dbt integration
-ruff check src/ tests/ action/
+ruff check src/ tests/ action/ integrations/
 pytest                        # 200+ tests, runs in <1s
 ```
 
@@ -57,7 +57,7 @@ Subject line ≤72 chars. Body explains the *why*, not the *what*. Multi-line is
 
 1. **Branch** from `main` — `feat/<short-description>` or `fix/<short-description>`
 2. **One PR per logical change.** Don't bundle a feature with unrelated cleanup
-4. **Run `ruff check src/ tests/ action/` and `pytest` locally** before pushing — CI mirrors these
+4. **Run `ruff check src/ tests/ action/ integrations/` and `pytest` locally** before pushing — CI mirrors these
 5. **Open the PR with a body that covers**: what changed, why, how to test, screenshots if UI
 6. **Wait for review** — single approval required to merge
 7. **Squash merge** is the default
