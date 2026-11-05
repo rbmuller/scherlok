@@ -317,7 +317,7 @@ Outside GitHub Actions: install the package, restore the shared store, run `sche
 docker run --rm \
   -v "$PWD:/work" -w /work \
   -e SCHERLOK_CONNECTION=postgres://... \
-  ghcr.io/rbmuller/scherlok:latest watch --exit-code --fail-on critical
+  ghcr.io/rbmuller/scherlok:latest watch
 ```
 
 The image is built from `python:3.12-slim`, bundles every warehouse extra and runs unprivileged.
