@@ -28,10 +28,11 @@ Multipart HTML and plain text.
 ## Exit codes
 
 ```bash
-scherlok watch --exit-code --fail-on critical
+scherlok watch                      # exit 1 when a CRITICAL anomaly fired
+scherlok verify --fail-on warning   # exit 1 on a WARNING or worse, and saves no profiles
 ```
 
-Exit 1 when an anomaly at or above the chosen severity fired; see [CI/CD gate](ci-cd.md).
+`ci`, `check` and `verify` take `--fail-on critical|warning`; see [CI/CD gate](ci-cd.md).
 
 ## Add a root-cause hypothesis
 

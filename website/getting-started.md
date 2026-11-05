@@ -148,7 +148,7 @@ scherlok history --approvals       Every baseline change a person accepted
 scherlok accept --table T --reason "..."   Make the current state the baseline
 scherlok report [--output json]    Detailed profile summary
 scherlok dashboard --out report.html   Self-contained HTML report
-scherlok config show               Current settings
+scherlok config                    Current settings
 ```
 
 Add `--verbose` for timings or `--quiet` to print only anomalies.
