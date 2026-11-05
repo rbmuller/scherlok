@@ -13,6 +13,7 @@ from scherlok.dbt.lineage import (
     upstream_of,
 )
 from scherlok.dbt.manifest import (
+    DEFAULT_TARGET_PATH,
     DbtExposure,
     DbtNode,
     discover_exposures,
@@ -22,16 +23,19 @@ from scherlok.dbt.manifest import (
 )
 from scherlok.dbt.profiles import ProfileResolutionError, resolve_connection_string
 from scherlok.dbt.run_results import (
+    built_models,
     load_run_results,
     successful_model_unique_ids,
     successful_model_unique_ids_from_results,
 )
 
 __all__ = [
+    "DEFAULT_TARGET_PATH",
     "DbtNode",
     "DbtExposure",
     "ProfileResolutionError",
     "build_dependency_graph",
+    "built_models",
     "discover_exposures",
     "discover_models",
     "discover_sources",

@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: ruff check src/ tests/ action/
+      - run: ruff check src/ tests/ action/ integrations/
       - run: pytest tests/ -v
 
   publish:

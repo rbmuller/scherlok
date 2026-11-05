@@ -1,0 +1,13 @@
+{
+  "name": "scherlok",
+  "displayName": "Scherlok",
+  "description": "Check the data after every dbt run: a hook runs the read-only `scherlok verify` gate after `dbt run` and `dbt build` and hands Claude the findings, and the verify-data-pipeline skill sets the loop of verify, fix and verify again, with baseline changes left to a person.",
+  "author": {
+    "name": "Robson Bayer Müller",
+    "url": "https://github.com/rbmuller"
+  },
+  "homepage": "https://rbmuller.github.io/scherlok/agents/",
+  "repository": "https://github.com/rbmuller/scherlok",
+  "license": "MIT",
+  "keywords": ["data-quality", "dbt", "anomaly-detection", "data-engineering"]
+}

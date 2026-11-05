@@ -116,6 +116,16 @@ The wrapper also accepts `--output json`, matching `scherlok dbt --output json`:
 
 Under `--output json`, the dbt command's own stdout is rerouted to stderr so it never mixes with the JSON payload. If `dbt run` fails, or `dbt build` exits 2 or another unexpected nonzero code, stdout gets a small JSON error document (`{"project_dir", "error", "returncode"}`) instead of plain text. If `dbt build` exits 1 but produces usable results, stdout contains the profiling JSON and the process still exits 1.
 
+### Read-only check of the last run: `scherlok verify --dbt-project`
+
+`scherlok dbt` and the wrapper learn: their results become the next baseline. To check what the last dbt run built without changing any baseline, as a gate or after an agent's change, use `verify`:
+
+```bash
+scherlok verify --dbt-project . --output json
+```
+
+It uses the same `run_results.json` filtering and model-to-table matching as the wrapper, takes the connection from `SCHERLOK_CONNECTION` or `scherlok connect` rather than `profiles.yml` (so any adapter Scherlok connects to works), and lists models the connection can't see under `dbt_models_not_found`. The [Claude Code plugin](https://rbmuller.github.io/scherlok/agents/) runs it after every `dbt run` and `dbt build` an agent runs.
+
 ## Lineage and downstream impact
 
 Scherlok reads `parent_map` from `manifest.json` to know each model's place in the DAG. Two features use it:

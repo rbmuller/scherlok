@@ -79,6 +79,8 @@ Either drop a project-scoped `.mcp.json` in your repo root:
 claude mcp add scherlok --env SCHERLOK_CONNECTION="postgresql://..." -- scherlok-mcp
 ```
 
+To have Claude Code check the data on its own after every `dbt run` and `dbt build`, add the Scherlok plugin too: its hook runs `scherlok verify` on what the run built and hands Claude the findings. See [Coding agents](https://rbmuller.github.io/scherlok/agents/).
+
 ## Tools
 
 | Tool | Args | What it does |

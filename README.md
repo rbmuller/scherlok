@@ -343,6 +343,24 @@ The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, `chec
 
 📖 Full docs: [MCP server guide →](src/scherlok/mcp/README.md)
 
+## Check an agent's dbt changes (Claude Code)
+
+An agent that finishes `dbt run` reports success: the SQL ran. The Claude Code plugin makes it check the data. After every `dbt run` or `dbt build`, a hook runs `scherlok verify` on the models that run built and hands Claude the findings; the `verify-data-pipeline` skill has it fix the cause, verify again, and leave accepting a new baseline to a person.
+
+<!-- DEMO GIF PLACEHOLDER (#113): record it by following examples/claude_code_demo/README.md
+("Recording the README GIF"), save it as assets/claude-code-demo.gif, then replace this comment with:
+<div align="center"><img src="assets/claude-code-demo.gif" alt="Claude Code adds a join that fans out, Scherlok's hook reports it, Claude fixes the join and the check passes" width="700"></div>
+-->
+
+**Demo:** [a dbt project on DuckDB](examples/claude_code_demo/) where the agent adds a join that fans out, the hook fires, the agent fixes the join and the check passes.
+
+```text
+/plugin marketplace add rbmuller/scherlok
+/plugin install scherlok@scherlok
+```
+
+The hook stays silent until Scherlok is installed and has a connection, and it never fails the session. Lock the baselines for agent sessions with `SCHERLOK_BASELINE_LOCKED=1`. Other coding agents get the same instructions from an [`AGENTS.md` snippet](integrations/AGENTS.snippet.md), and `scherlok verify --dbt-project .` scopes a check to the last dbt run anywhere, CI included. 📖 [Coding agents guide →](https://rbmuller.github.io/scherlok/agents/)
+
 ## AI-explained alerts (`--explain`)
 
 Your alert says **what** broke. `--explain` adds **why** — and what to check next.
@@ -449,7 +467,7 @@ scherlok connect <url>          Connect to a database
 scherlok investigate            Profile all tables (learn patterns)
 scherlok watch [-w <url>] [-e <email>]  Detect anomalies and alert
 scherlok ci <url> [opts]        All-in-one CI/CD command (connect + watch + exit code)
-scherlok verify [--table T] [--fail-on L] [--output json] [--record PATH] [--against SCOPE] [--ignore volume]  Read-only gate: compare, keep the baseline
+scherlok verify [--table T] [--dbt-project DIR] [--fail-on L] [--output json] [--record PATH] [--against SCOPE] [--ignore volume]  Read-only gate: compare, keep the baseline
 scherlok reconcile --source S --target T [--key K] [--sum C] [--tolerance X] [--output json]  Check an output table against its input
 scherlok accept --table T --reason "..." [--yes]  Make the current state the baseline, with a recorded approval
 scherlok dbt [--project-dir .] [--output json]  Profile dbt models from manifest
@@ -460,6 +478,7 @@ scherlok report [--output json] Detailed profile summary
 scherlok dashboard [--out .html] Generate self-contained HTML report
 scherlok config --store <url>   Set remote storage
 scherlok config --baseline-locked  Only `accept` writes baselines (--no-baseline-locked to undo)
+scherlok config --output json   Is a connection configured (never printed), the store, the lock
 scherlok demo [--keep] [--output json]  Self-contained demo on a sample DuckDB (no database needed)
 scherlok version                Show version
 ```

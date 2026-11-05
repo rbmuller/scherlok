@@ -17,6 +17,10 @@ ENV_CONNECTION = "SCHERLOK_CONNECTION"
 
 ENV_STORE = "SCHERLOK_STORE"
 
+# Where the connection string comes from, as `scherlok config --output json` reports it.
+CONNECTION_SOURCE_ENV = "env"
+CONNECTION_SOURCE_CONFIG = "config"
+
 # Locked mode (#109): only `scherlok accept` writes baselines. Either the saved
 # setting or the variable locks. The variable can't unlock a saved lock, and
 # any value but these locks, so a typo fails closed.
@@ -84,6 +88,16 @@ class ScherlokConfig:
     def get_connection_string(self) -> str:
         """Return connection string from env var or config file."""
         return os.environ.get(ENV_CONNECTION, self.connection_string)
+
+    def connection_source(self) -> str | None:
+        """Where `get_connection_string` finds a connection: "env", "config", or None.
+
+        SCHERLOK_CONNECTION wins when it is set, even to an empty string,
+        which then means no connection.
+        """
+        if not self.get_connection_string():
+            return None
+        return CONNECTION_SOURCE_ENV if ENV_CONNECTION in os.environ else CONNECTION_SOURCE_CONFIG
 
     def get_store(self) -> str | None:
         """Return remote store URL from env var or config."""

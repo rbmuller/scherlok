@@ -1,0 +1,17 @@
+{
+  "name": "scherlok",
+  "description": "Scherlok's Claude Code plugin: check the data after every dbt run.",
+  "owner": {
+    "name": "Robson Bayer Müller",
+    "url": "https://github.com/rbmuller"
+  },
+  "plugins": [
+    {
+      "name": "scherlok",
+      "source": "./integrations/claude-code",
+      "description": "A hook runs the read-only `scherlok verify` gate after `dbt run` and `dbt build` and hands Claude the findings; the verify-data-pipeline skill sets the loop of verify, fix and verify again.",
+      "category": "data",
+      "tags": ["data-quality", "dbt", "verification"]
+    }
+  ]
+}
