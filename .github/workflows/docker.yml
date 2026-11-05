@@ -10,7 +10,8 @@ name: Docker
 on:
   push:
     tags:
-      - "v*"
+      # vX.Y.Z only: the GitHub Action's moving `v1` tag must not publish anything.
+      - "v*.*.*"
 
 permissions:
   contents: read
