@@ -397,7 +397,7 @@ def anomaly_to_dict(anomaly: dict) -> dict[str, Any]:
     return {
         "table": anomaly.get("table"),
         "type": anomaly.get("type"),
-        "severity": _severity_name(anomaly.get("severity", "")),
+        "severity": severity_name(anomaly.get("severity", "")),
         "message": anomaly.get("message"),
         **anomaly_details(anomaly),
     }
@@ -407,12 +407,12 @@ def severity_counts(anomalies: list[dict]) -> dict[str, int]:
     """Count anomalies per severity, keyed ``critical``, ``warning`` and ``info``."""
     counts = {severity.value.lower(): 0 for severity in Severity}
     for anomaly in anomalies:
-        name = _severity_name(anomaly.get("severity", "")).lower()
+        name = severity_name(anomaly.get("severity", "")).lower()
         if name in counts:
             counts[name] += 1
     return counts
 
 
-def _severity_name(severity: object) -> str:
+def severity_name(severity: object) -> str:
     """Bare severity name (``"CRITICAL"``) for an enum member or a stored string."""
     return str(severity).rsplit(".", 1)[-1]

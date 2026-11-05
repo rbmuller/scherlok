@@ -308,7 +308,7 @@ def test_dbt_names_the_models_that_kept_their_baseline(mock_get_connector, tmp_p
         "message": "Row count dropped 70.0% (1,000 -> 300)",
     }
 
-    def watch_table(_connector, _store, table):
+    def watch_table(_connector, _store, table, **_options):
         return ([dict(drop)] if table == "fct_orders" else []), {"row_count": BASELINE_ROWS}
 
     with patch("scherlok.cli._watch_table", side_effect=watch_table):

@@ -45,9 +45,37 @@ The first `watch` after `investigate` compares against that baseline. Every run 
 
 A run that finds a CRITICAL anomaly on a table saves the anomaly but none of that table's profiles. The table keeps its baseline, so the alert repeats on every run until the data recovers, and the broken state never becomes the reference. Recovery needs no manual step: once the data is back, the next run passes and is learned again. WARNING and INFO findings are learned, as are the other tables of the same run.
 
-This holds for `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `watch`, `check` and `investigate` tools. `verify` never saves profiles at all. When the change is intended, such as a planned backfill or a new column, re-profile with `scherlok investigate` to make it the new normal.
+This holds for `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `watch`, `check` and `investigate` tools. `verify` never saves profiles at all. When the change is intended, such as a planned backfill or a new column, a person makes it the new normal with `scherlok accept`.
 
 `freshness_critical` is the exception and is learned like a warning. Freshness compares a table's age with its age on the previous run, so keeping the old reading would report a table updated less often than it is watched, such as a weekly table watched daily, on every run until its next update.
+
+## Accepting a change
+
+```bash
+scherlok accept --table orders --reason "Backfilled 2025 orders"
+scherlok accept --table orders --table refunds --reason "New refunds flow" --yes
+scherlok history --approvals [--output json]
+```
+
+`accept` profiles each table, compares it with the current baseline and shows the result: rows and columns before and after, and the anomalies the new state shows. On confirmation it saves the new state as the baseline and appends one row per table to the store's `baseline_approvals` table: the table, who approved (`git config user.email`, else `$USER`), the reason, the before/after summary and the time. `--reason` is required; `--yes` skips the prompt, for a workflow a person triggers. Answering no, or naming a table the connection can't see, changes nothing. A table without a baseline gets its first one.
+
+The approvals table only grows: the store refuses to update or delete a row. `scherlok history --approvals` lists approvals, newest first; `--output json` prints the summaries in full.
+
+`scherlok investigate` also overwrites baselines, every table's, without asking or recording anything. Prefer `accept` for a change someone should be able to trace.
+
+### Locked baselines
+
+```bash
+scherlok config --baseline-locked       # or SCHERLOK_BASELINE_LOCKED=1
+scherlok config --no-baseline-locked    # back to learning
+```
+
+With baselines locked, only `accept` writes them, including the first baseline of a new table. `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `watch` and `check` tools still compare, alert, and save anomalies and run records, but no profiles; `investigate` and the MCP `investigate` tool refuse. Locking is off by default. `SCHERLOK_BASELINE_LOCKED` locks with any value but an empty string, `0`, `false`, `no` or `off`, and can't unlock a lock saved with `scherlok config`.
+
+`accept` is deliberately not an MCP tool, so an agent can't approve its own change with a tool call.
+
+!!! warning "A guardrail, not a security boundary"
+    An agent with shell access can run `scherlok accept` or `scherlok config --no-baseline-locked` itself, or edit the SQLite file. Real enforcement means running `scherlok verify` in CI against a store the agent has no credentials for, with `accept` run from a workflow a person triggers; see [CI/CD gate](ci-cd.md#accepting-a-change-from-ci).
 
 ## Run watch on a schedule
 
@@ -101,7 +129,8 @@ Records saved before scopes existed have none and keep counting for every connec
 | Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
 | Anomaly history | table, anomaly type, severity, message, detection time, id of the run that found it; the column involved, the metric with its baseline and current values (aggregates or column types), the change in percent and a fixed hint |
 | Runs | command, Scherlok version, names of the tables checked, `--fail-on`, passed or failed, anomaly count per severity, start and end time |
-| Scope, on every profile, anomaly and run | adapter, host, port and path of the connection, never credentials |
+| Baseline approvals | table, who approved, reason, row and column counts before and after, the accepted anomalies' types, severities and aggregates, time |
+| Scope, on every profile, anomaly, run and approval | adapter, host, port and path of the connection, never credentials |
 
 Anomaly messages quote the same aggregates and column names. Under `scherlok dbt` and `scherlok dbt-run-and-watch` they also name the downstream dbt models and exposures, with the exposure owners declared in your dbt project.
 
@@ -115,6 +144,8 @@ Older releases also saved each column's five most frequent values and its minimu
 scherlok status [--output json]    Health per table
 scherlok history [--days N]        Past anomalies
 scherlok history --runs            Every run, passing or not
+scherlok history --approvals       Every baseline change a person accepted
+scherlok accept --table T --reason "..."   Make the current state the baseline
 scherlok report [--output json]    Detailed profile summary
 scherlok dashboard --out report.html   Self-contained HTML report
 scherlok config show               Current settings

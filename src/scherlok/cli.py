@@ -28,7 +28,16 @@ from scherlok.alerter.exitcode import (
     normalize_fail_on,
 )
 from scherlok.alerter.webhook import send_webhook
-from scherlok.config import ScherlokConfig
+from scherlok.approvals import (
+    ANOMALIES_KEY,
+    COLUMN_COUNT_KEY,
+    ROW_COUNT_KEY,
+    ProposedBaseline,
+    accept_baseline,
+    approver,
+    propose_baseline,
+)
+from scherlok.config import BASELINE_LOCKED_SETTING, ENV_BASELINE_LOCKED, ScherlokConfig
 from scherlok.connectors import get_connector
 from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
@@ -69,11 +78,18 @@ from scherlok.service import (
     blocks_baseline,
     connection_scope,
     profile_and_detect,
+    select_tables,
     severity_counts,
     verify_tables,
 )
 from scherlok.store.remote import sync_context
-from scherlok.store.sqlite import RUN_PASSED_KEY, RUN_TABLES_KEY, ProfileStore
+from scherlok.store.sqlite import (
+    APPROVAL_AFTER_KEY,
+    APPROVAL_BEFORE_KEY,
+    RUN_PASSED_KEY,
+    RUN_TABLES_KEY,
+    ProfileStore,
+)
 
 OUTPUT_TEXT = "text"
 OUTPUT_JSON = "json"
@@ -223,6 +239,11 @@ def config(
     store: str = typer.Option(
         None, "--store", help="Remote store URL (s3://, gs://, az://)"
     ),
+    baseline_locked: bool | None = typer.Option(
+        None, "--baseline-locked/--no-baseline-locked",
+        help="Locked: only `scherlok accept` writes baselines; watch, ci, check, dbt "
+        "and the MCP tools compare without saving profiles.",
+    ),
 ) -> None:
     """Configure Scherlok settings.
 
@@ -230,24 +251,57 @@ def config(
         scherlok config --store s3://my-bucket/scherlok/profiles.db
         scherlok config --store gs://my-bucket/scherlok/profiles.db
         scherlok config --store az://my-container/scherlok/profiles.db
+        scherlok config --baseline-locked
     """
     cfg = ScherlokConfig.load()
-    if store is not None:
-        cfg.settings["store"] = store
-        cfg.save()
-        console.print(f"[green]Store set to:[/green] {store}")
-    else:
+    if store is None and baseline_locked is None:
         current = cfg.settings.get("store") or "local (~/.scherlok/)"
         console.print(f"Current store: [cyan]{current}[/cyan]")
+        locked = "yes" if cfg.baseline_locked() else "no"
+        console.print(f"Baselines locked: [cyan]{locked}[/cyan]")
+        return
+
+    if store is not None:
+        cfg.settings["store"] = store
+    if baseline_locked is not None:
+        cfg.settings[BASELINE_LOCKED_SETTING] = baseline_locked
+    cfg.save()
+    if store is not None:
+        console.print(f"[green]Store set to:[/green] {store}")
+    if baseline_locked:
+        console.print(
+            "[green]Baselines locked:[/green] only [bold]scherlok accept[/bold] writes them."
+        )
+    elif baseline_locked is not None:
+        console.print("[green]Baselines unlocked:[/green] runs learn again.")
+        if cfg.baseline_locked():
+            console.print(
+                f"[yellow]{ENV_BASELINE_LOCKED} still locks them in this environment.[/yellow]"
+            )
+
+
+def _exit_if_baseline_locked(cfg: ScherlokConfig) -> None:
+    """Refuse a command whose only job is writing baselines while they are locked."""
+    if cfg.baseline_locked():
+        out_error(
+            "[red]Baselines are locked: only [bold]scherlok accept --table NAME "
+            '--reason "..."[/bold] writes them.[/red]'
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()
 def investigate() -> None:
     """Profile all tables and store results.
 
+    Overwrites every table's baseline, without asking or recording an
+    approval; `scherlok accept` does both, for the tables you name. Refused
+    while baselines are locked.
+
     Example:
         scherlok investigate
     """
+    _exit_if_baseline_locked(ScherlokConfig.load())
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
 
@@ -290,15 +344,18 @@ def investigate() -> None:
         )
 
 
-def _watch_table(connector: object, store: ProfileStore, table: str) -> tuple[list[dict], dict]:
+def _watch_table(
+    connector: object, store: ProfileStore, table: str, *, persist: bool = True
+) -> tuple[list[dict], dict]:
     """Profile one table + detect anomalies against stored baseline. Saves new profiles,
-    unless a CRITICAL anomaly keeps the baseline (#116).
+    unless a CRITICAL anomaly keeps the baseline (#116) or `persist` is False
+    (baselines locked, #109).
 
     Thin CLI-facing alias over `service.profile_and_detect` — kept so existing
     call sites and tests that patch `scherlok.cli._watch_table` stay valid.
     Returns (anomalies, current_volume).
     """
-    return profile_and_detect(connector, store, table)
+    return profile_and_detect(connector, store, table, persist=persist)
 
 
 # Table names a one-line summary lists before it cuts the list short.
@@ -311,15 +368,20 @@ def _table_preview(tables: list[str]) -> str:
     return f"{preview} …" if len(tables) > PREVIEW_TABLES else preview
 
 
-def _print_kept_baselines(tables: list[str]) -> None:
-    """Name the tables whose reading was not learned because of a CRITICAL anomaly (#116)."""
+def _print_kept_baselines(tables: list[str], locked: bool = False) -> None:
+    """Name the tables whose reading was not learned because of a CRITICAL anomaly (#116).
+
+    With baselines locked (#109) nothing was learned, which only --verbose says.
+    """
+    if locked:
+        verbose_info(f"Baselines are locked ({ENV_BASELINE_LOCKED} or config): nothing learned.")
     if not tables:
         return
     out_info(
         f"[yellow]Baseline kept, CRITICAL reading not learned ({len(tables)}): "
         f"{_table_preview(tables)}. The alert repeats on every run until the data "
-        "recovers; if the change is intended, [bold]scherlok investigate[/bold] "
-        "makes it the new normal.[/yellow]"
+        "recovers; if the change is intended, [bold]scherlok accept --table NAME "
+        '--reason "..."[/bold] makes it the new normal.[/yellow]'
     )
 
 
@@ -443,7 +505,8 @@ def _run_watch(
     connector are used. When `connector` is None, one is loaded from the
     saved config. `fail_on` feeds the --explain context and the run record
     (CRITICAL when None, as `watch` exits); exit-code policy stays with the
-    callers.
+    callers. With baselines locked (#109) no profile is saved; anomalies and
+    the run record still are.
     """
     if connector is None:
         connector = _get_connector_or_exit()
@@ -459,11 +522,12 @@ def _run_watch(
             tables = connector.list_tables()
         all_anomalies: list[dict] = []
         kept_baselines: list[str] = []
+        locked = cfg.baseline_locked()
 
         out_info(f"Watching [bold]{len(tables)}[/bold] tables...")
 
         for table in tables:
-            anomalies, _ = _watch_table(connector, store, table)
+            anomalies, _ = _watch_table(connector, store, table, persist=not locked)
             all_anomalies.extend(anomalies)
             if blocks_baseline(anomalies):
                 kept_baselines.append(table)
@@ -480,7 +544,7 @@ def _run_watch(
             ),
             run_id=run.run_id,
         )
-        _print_kept_baselines(kept_baselines)
+        _print_kept_baselines(kept_baselines, locked)
         store.save_run(run.finish(tables, all_anomalies).to_dict())
 
     return all_anomalies
@@ -913,6 +977,135 @@ def reconcile(
         raise typer.Exit(code=1)
 
 
+NO_BASELINE = "no baseline"
+# Anomalies listed per table in the `accept` summary before it cuts the list.
+PREVIEW_FINDINGS = 3
+
+
+def _before_after(before: dict | None, after: dict | None, key: str) -> str:
+    """``1,000 → 300`` for one summary key, ``no baseline → 300`` for a new table."""
+    def fmt(summary: dict | None) -> str:
+        if summary is None:
+            return NO_BASELINE
+        value = summary.get(key)
+        return f"{value:,}" if isinstance(value, int) else str(value)
+
+    return f"{fmt(before)} → {fmt(after)}"
+
+
+def _findings_preview(anomalies: list[dict]) -> str:
+    """``volume_drop (CRITICAL), null_rate_change email (WARNING)``, cut after a few."""
+    if not anomalies:
+        return "none"
+    labels = [
+        " ".join(filter(None, (a["type"], a.get("column")))) + f" ({a['severity']})"
+        for a in anomalies
+    ]
+    overflow = len(labels) - PREVIEW_FINDINGS
+    preview = ", ".join(rich_escape(label) for label in labels[:PREVIEW_FINDINGS])
+    return f"{preview}, +{overflow} more" if overflow > 0 else preview
+
+
+def _print_proposals(proposals: list[ProposedBaseline], reason: str, approved_by: str) -> None:
+    """The before/after summary `accept` asks a person to confirm."""
+    tbl = Table(title="Accept as the new baseline")
+    tbl.add_column("Table", style="cyan")
+    tbl.add_column("Rows", justify="right")
+    tbl.add_column("Columns", justify="right")
+    tbl.add_column("Against the current baseline")
+    for proposal in proposals:
+        after = proposal.after
+        tbl.add_row(
+            rich_escape(proposal.table),
+            _before_after(proposal.before, after, ROW_COUNT_KEY),
+            _before_after(proposal.before, after, COLUMN_COUNT_KEY),
+            _findings_preview(after[ANOMALIES_KEY]),
+        )
+    console.print(tbl)
+    console.print(f"Reason: {rich_escape(reason)}")
+    console.print(f"Approved by: {rich_escape(approved_by)}")
+
+
+@app.command()
+def accept(
+    table: list[str] = typer.Option(
+        ..., "--table",
+        help="Table whose current state becomes its baseline. Repeat to accept several.",
+    ),
+    reason: str = typer.Option(
+        ..., "--reason", help="Why this state is the new normal. Required, and recorded.",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y",
+        help="Skip the confirmation prompt, for a workflow a person triggers.",
+    ),
+) -> None:
+    """Make the current state of tables their baseline, with a recorded approval.
+
+    A run never learns a reading with a CRITICAL anomaly, and with baselines
+    locked no run learns at all, so an intended change (a new column, a
+    planned backfill) becomes the new normal here. Each table is profiled and
+    compared with its baseline, the before/after summary is shown, and on
+    confirmation the new profiles are saved with one approval row per table:
+    who approved (`git config user.email`, else $USER), the reason, and the
+    summary. `scherlok history --approvals` lists them. A table without a
+    baseline gets its first one. Works whether baselines are locked or not.
+
+    Deliberately not an MCP tool, so an agent can't approve its own change
+    with a tool call. A guardrail, not a security boundary: anything that can
+    run this CLI or write the store can still change the baseline.
+
+    Example:
+        scherlok accept --table orders --reason "Backfilled 2025 orders"
+        scherlok accept --table orders --table refunds --reason "New refunds flow" --yes
+    """
+    reason = reason.strip()
+    if not reason:
+        out_error("[red]--reason is empty. Say why this state is the new normal.[/red]")
+        raise typer.Exit(code=1)
+    connector = _get_connector_or_exit()
+    cfg = ScherlokConfig.load()
+    store_url = cfg.get_store()
+
+    from scherlok.config import PROFILES_DB
+    # Compare without uploading: the prompt may wait for minutes, and putting
+    # the copy back after a "no" would overwrite what other jobs saved since.
+    with sync_context(store_url, PROFILES_DB, upload_on_exit=False):
+        store = _open_store(connector.connection_string)
+        try:
+            targets = select_tables(table, connector.list_tables())
+            proposals = [propose_baseline(connector, store, name) for name in targets]
+        except UnknownTablesError as exc:
+            out_error(f"[red]{rich_escape(str(exc))}[/red]")
+            raise typer.Exit(code=1) from exc
+        finally:
+            store.close()
+
+    approved_by = approver()
+    _print_proposals(proposals, reason, approved_by)
+    prompt = f"Make this the new baseline of {len(proposals)} table(s)?"
+    if not yes and not typer.confirm(prompt, default=False):
+        out_error("[yellow]Nothing accepted.[/yellow]")
+        raise typer.Exit(code=1)
+
+    # Downloaded again so the new rows land on the latest copy of a remote store.
+    with sync_context(store_url, PROFILES_DB):
+        store = _open_store(connector.connection_string)
+        try:
+            for proposal in proposals:
+                approval = proposal.approval(
+                    scope=store.scope, approved_by=approved_by, reason=reason
+                )
+                accept_baseline(store, proposal, approval)
+        finally:
+            store.close()
+
+    out_info(
+        f"[green]Accepted ({len(proposals)}):[/green] {_table_preview(targets)}. "
+        "See [bold]scherlok history --approvals[/bold]."
+    )
+
+
 @app.command()
 def dbt(
     project_dir: str = typer.Option(
@@ -1165,10 +1358,13 @@ def _dbt_impl(
     json_models: list[dict] = []
     explain_lineage: dict[str, list[str]] = {}
     kept_baselines: list[str] = []
+    locked = cfg.baseline_locked()
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = _open_store(conn_str)
         for node, physical in matched:
-            table_anomalies, current_vol = _watch_table(connector, store, physical)
+            table_anomalies, current_vol = _watch_table(
+                connector, store, physical, persist=not locked
+            )
             if blocks_baseline(table_anomalies):
                 kept_baselines.append(physical)
             # Enrich each anomaly's message with downstream-impact info so the
@@ -1198,7 +1394,7 @@ def _dbt_impl(
                 adapter=adapter, fail_on=fail_on, lineage=explain_lineage or None
             ),
         )
-        _print_kept_baselines(kept_baselines)
+        _print_kept_baselines(kept_baselines, locked)
 
     # 5. Summary + exit code
     crit = sum(1 for a in all_anomalies if str(a.get("severity")).endswith("CRITICAL"))
@@ -1918,6 +2114,34 @@ def _print_runs(records: list[dict], days: int, json_mode: bool) -> None:
     console.print(tbl)
 
 
+def _print_approvals(records: list[dict], days: int, json_mode: bool) -> None:
+    """Render `history --approvals`: one JSON array, or a table, newest first."""
+    if json_mode:
+        print(json.dumps(records))
+        return
+    if not records:
+        console.print(f"[yellow]No baseline approvals in the last {days} days.[/yellow]")
+        return
+
+    # The summaries in full, with the anomalies each approval accepted, are
+    # in `--output json`.
+    tbl = Table(title=f"Baseline approvals (last {days} days)")
+    tbl.add_column("Approved At", no_wrap=True)
+    tbl.add_column("Table", style="cyan")
+    tbl.add_column("Rows", justify="right")
+    tbl.add_column("Approved By", overflow="fold")  # an e-mail has no space to wrap at
+    tbl.add_column("Reason")
+    for r in records:
+        tbl.add_row(
+            r["approved_at"][:19].replace("T", " "),
+            rich_escape(r["table_name"]),
+            _before_after(r[APPROVAL_BEFORE_KEY], r[APPROVAL_AFTER_KEY], ROW_COUNT_KEY),
+            rich_escape(r["approved_by"]),
+            rich_escape(r["reason"]),
+        )
+    console.print(tbl)
+
+
 @app.command()
 def history(
     days: int = typer.Option(30, "--days", "-d", help="Number of days to look back"),
@@ -1926,18 +2150,23 @@ def history(
         help="List runs (watch, ci, check, verify, MCP tools), passing or not, "
         "instead of anomalies.",
     ),
+    approvals: bool = typer.Option(
+        False, "--approvals",
+        help="List baseline approvals made with `scherlok accept` instead of anomalies.",
+    ),
     output: str = typer.Option(
         "text", "--output",
         help="Output format: 'text' (default) or 'json' for CI parsers",
     ),
 ) -> None:
-    """Show timeline of detected anomalies, or with --runs every recorded run.
+    """Show timeline of detected anomalies, or every recorded run or baseline approval.
 
     Example:
         scherlok history
         scherlok history --days 7
         scherlok history --output json
         scherlok history --runs --output json
+        scherlok history --approvals --output json
     """
     output_lower = output.lower()
     if output_lower not in ("text", "json"):
@@ -1946,11 +2175,17 @@ def history(
         )
         raise typer.Exit(code=1)
     json_mode = output_lower == "json"
+    if runs and approvals:
+        out_error("[red]Use --runs or --approvals, not both.[/red]")
+        raise typer.Exit(code=1)
 
     # Scoped to the configured connection, which is read but never opened.
     store = _open_store(ScherlokConfig.load().get_connection_string())
     if runs:
         _print_runs(store.get_runs(days=days), days, json_mode)
+        return
+    if approvals:
+        _print_approvals(store.get_approvals(days=days), days, json_mode)
         return
     records = store.get_anomaly_history(days=days)
 

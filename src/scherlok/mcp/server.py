@@ -11,6 +11,10 @@ Security model (see src/scherlok/mcp/README.md):
   - Every operation is read-only on the warehouse (SELECT / information_schema).
     There is no arbitrary-SQL tool.
   - Tool output is bounded so a single call can't exhaust the agent's context.
+  - No tool approves a baseline change: `scherlok accept` is CLI-only, and
+    with baselines locked (`SCHERLOK_BASELINE_LOCKED`) no tool writes one.
+    A guardrail, not a security boundary: an agent with shell access can run
+    the CLI or edit the store file.
 """
 
 from __future__ import annotations
@@ -74,6 +78,22 @@ class ConnectionNotConfiguredError(RuntimeError):
     """Raised when no connection string is available server-side."""
 
 
+class BaselineLockedError(RuntimeError):
+    """Raised by `investigate` while baselines are locked (#109)."""
+
+
+BASELINE_LOCKED_MESSAGE = (
+    "Baselines are locked: no MCP tool writes them. `watch`, `check` and "
+    "`verify` still compare. A person makes a state the new baseline with "
+    '`scherlok accept --table NAME --reason "..."`.'
+)
+
+
+def _baseline_locked() -> bool:
+    """True when the server must compare without saving profiles (#109)."""
+    return ScherlokConfig.load().baseline_locked()
+
+
 def _resolve_connection() -> str:
     """Return the server-side connection string or raise a clear, actionable error."""
     conn = ScherlokConfig.load().get_connection_string()
@@ -109,19 +129,21 @@ def _watch_tables(
     """Profile, detect and save profiles and anomalies for `tables` (None = all).
 
     A table with a CRITICAL anomaly keeps its baseline: its profiles are not
-    saved, only the anomalies (#116). The run is recorded under `command`,
-    judged by `fail_on`, passing or not.
+    saved, only the anomalies (#116); with baselines locked no profile is
+    saved (#109). The run is recorded under `command`, judged by `fail_on`,
+    passing or not.
     Returns ``(tables_watched, anomalies)`` with the raw anomaly dicts, so
     `check` can decide the gate on every anomaly, not on the capped output.
     """
     connector = _connect()
     targets = select_tables(tables, connector.list_tables())
+    persist = not _baseline_locked()
     store = _open_store(connector.connection_string)
     try:
         run = RunRecord(command=command, scope=store.scope, fail_on=fail_on)
         all_anomalies: list[dict] = []
         for table in targets:
-            anomalies, _vol = profile_and_detect(connector, store, table)
+            anomalies, _vol = profile_and_detect(connector, store, table, persist=persist)
             all_anomalies.extend(anomalies)
         if all_anomalies:
             store.save_anomalies(all_anomalies, run_id=run.run_id)
@@ -159,7 +181,11 @@ def investigate(tables: list[str] | None = None) -> dict[str, Any]:
     anomalies are reported here. Run `watch` later to detect drift. A table
     whose current state has a CRITICAL anomaly against its baseline keeps that
     baseline, with `baseline_updated` false: a broken state is not learned.
+    Only a person makes it the new baseline, with `scherlok accept`. Fails
+    while baselines are locked.
     """
+    if _baseline_locked():
+        raise BaselineLockedError(BASELINE_LOCKED_MESSAGE)
     connector = _connect()
     targets = select_tables(tables, connector.list_tables())
     store = _open_store(connector.connection_string)
@@ -188,7 +214,8 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     `all_null_column`, `duplicate_key` as WARNING, `constant_column` as INFO),
     and its baseline is set for next time. A table with a CRITICAL anomaly
     keeps its baseline, so the anomaly is reported again on every call until
-    the data recovers; WARNING and INFO findings are learned.
+    the data recovers or a person runs `scherlok accept`; WARNING and INFO
+    findings are learned. With baselines locked, nothing is learned.
     """
     tables_watched, anomalies = _watch_tables(tables, MCP_WATCH)
     return {
@@ -249,7 +276,8 @@ def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
     `passed` plus the severity counts the decision was based on. Like `watch`,
     it saves what it sees except a table with a CRITICAL anomaly, so a check
     failing on CRITICAL keeps failing until the data recovers, while one
-    failing on a WARNING passes next time; `verify` saves nothing.
+    failing on a WARNING passes next time; `verify` saves nothing. With
+    baselines locked, `check` saves no profiles either.
     """
     threshold = normalize_fail_on(fail_on)
     _tables_watched, anomalies = _watch_tables(None, MCP_CHECK, threshold)

@@ -120,6 +120,14 @@ Baselines and history belong to the database of the configured connection,
 so pointing the server at staging never moves the production baseline, even
 when both share one profile store.
 
+There is no `accept` tool, deliberately: an agent can't make its own change
+the new baseline with a tool call. A person runs `scherlok accept --table NAME
+--reason "..."`, which records who approved and why. To stop the tools from
+writing baselines at all, set `SCHERLOK_BASELINE_LOCKED=1` in the server's
+`env` (or run `scherlok config --baseline-locked`): `watch` and `check` then
+compare and record anomalies and runs without saving profiles, and
+`investigate` fails with an error naming `scherlok accept`.
+
 Every anomaly from `watch`, `verify`, `history` and `reconcile` carries structured fields
 next to `table`, `type`, `severity` and `message`, so the agent does not have
 to parse the sentence to learn what broke:
@@ -156,3 +164,8 @@ field `null` in `history`. See the
   can't run statements you didn't expose.
 - **Bounded output.** Tool results cap table and anomaly counts so a single
   call can't blow the agent's context budget.
+- **No tool approves a baseline.** `accept` is CLI-only and, with baselines
+  locked, no tool writes one. This is a guardrail, not a security boundary:
+  an agent with shell access can run the CLI or edit the SQLite file. Real
+  enforcement means running `scherlok verify` in CI against a store the agent
+  has no credentials for, with `accept` run from a workflow a person triggers.

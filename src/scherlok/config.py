@@ -17,6 +17,13 @@ ENV_CONNECTION = "SCHERLOK_CONNECTION"
 
 ENV_STORE = "SCHERLOK_STORE"
 
+# Locked mode (#109): only `scherlok accept` writes baselines. Either the saved
+# setting or the variable locks. The variable can't unlock a saved lock, and
+# any value but these locks, so a typo fails closed.
+ENV_BASELINE_LOCKED = "SCHERLOK_BASELINE_LOCKED"
+BASELINE_LOCKED_SETTING = "baseline_locked"
+UNLOCKED_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
+
 # config.json can hold a connection string with a password, so Scherlok's files
 # are owner-only rather than inheriting the umask (often world-readable).
 PRIVATE_DIR_MODE = 0o700
@@ -29,6 +36,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "freshness_tolerance_hours": 24,
     "slack_webhook_url": None,
     "store": None,
+    BASELINE_LOCKED_SETTING: False,
 }
 
 
@@ -80,3 +88,15 @@ class ScherlokConfig:
     def get_store(self) -> str | None:
         """Return remote store URL from env var or config."""
         return os.environ.get(ENV_STORE, self.settings.get("store"))
+
+    def baseline_locked(self) -> bool:
+        """True when only `scherlok accept` may write baselines (#109).
+
+        Set by `scherlok config --baseline-locked` or by SCHERLOK_BASELINE_LOCKED
+        holding anything but an empty string, 0, false, no or off.
+        """
+        env_value = os.environ.get(ENV_BASELINE_LOCKED)
+        env_locked = (
+            env_value is not None and env_value.strip().lower() not in UNLOCKED_ENV_VALUES
+        )
+        return env_locked or bool(self.settings.get(BASELINE_LOCKED_SETTING))

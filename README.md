@@ -91,7 +91,7 @@ Every run is learned, except one that finds a CRITICAL anomaly on a table:
 that table keeps its baseline, so the alert repeats on every run until the
 data recovers, and the broken state never becomes the new normal. WARNING and
 INFO findings are learned. When the change is intended, such as a planned
-backfill, re-profile with `scherlok investigate` to make it the new normal.
+backfill, a person makes it the new normal with `scherlok accept` (below).
 
 ### 1. `investigate` — Learn the patterns
 
@@ -181,6 +181,22 @@ scherlok reconcile --source raw.orders --target mart.orders \
 ```
 
 It reports `row_count_mismatch`, `duplicate_keys` (a key repeated in the target: join fan-out), `missing_keys`, `extra_keys` and `sum_mismatch` (totals apart by more than the absolute `--tolerance`), all CRITICAL, with `--output json` for CI. It needs no baseline and saves nothing, and it reports counts and totals only, never a key value. On BigQuery and Snowflake every run scans both tables in full. 📖 [Reconcile guide →](https://rbmuller.github.io/scherlok/reconcile/)
+
+## Accepting a change
+
+A CRITICAL reading is never learned, so an intended change (a new column, a planned backfill) keeps alerting until a person accepts it:
+
+```bash
+scherlok accept --table orders --reason "Backfilled 2025 orders"   # shows before/after, asks to confirm
+scherlok accept --table orders --reason "..." --yes                # no prompt, for a workflow a person triggers
+scherlok history --approvals                                       # who accepted what, and why
+```
+
+`accept` re-profiles the table, shows its rows, columns and anomalies against the current baseline, and on confirmation saves the new state as the baseline with one row in an append-only approvals table: who approved (`git config user.email`, else `$USER`), the reason, and the before/after summary. `--reason` is required.
+
+To keep agents and scheduled runs from moving baselines at all, lock them: `scherlok config --baseline-locked` or `SCHERLOK_BASELINE_LOCKED=1`. Then only `accept` writes a baseline, including a new table's first one; `watch`, `ci`, `check`, `dbt` and the MCP tools compare without saving profiles, and `investigate` refuses. `accept` is deliberately not an MCP tool.
+
+**This is a guardrail, not a security boundary.** An agent with shell access can run `scherlok accept` or edit the SQLite file itself. Real enforcement means running `verify` in CI against a store the agent has no credentials for, with `accept` run from a workflow a person triggers. 📖 [Accepting a change →](https://rbmuller.github.io/scherlok/getting-started/#accepting-a-change)
 
 ## Works with dbt
 
@@ -305,7 +321,7 @@ pip install scherlok   # scherlok-mcp ships built-in since v0.7.0
 }
 ```
 
-The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, `check`, `verify` and `reconcile` as tools; `verify` is the read-only gate that never changes the baseline, so an agent that retries can't pass a broken table, and `reconcile` checks a table it built against the table it built it from. Credentials are resolved server-side (never passed by the model), every operation is read-only on the warehouse, and there's no arbitrary-SQL tool.
+The agent gets `list_tables`, `investigate`, `watch`, `status`, `history`, `check`, `verify` and `reconcile` as tools; `verify` is the read-only gate that never changes the baseline, so an agent that retries can't pass a broken table, and `reconcile` checks a table it built against the table it built it from. There is no `accept` tool: a person approves baseline changes, and with baselines locked no tool writes one. Credentials are resolved server-side (never passed by the model), every operation is read-only on the warehouse, and there's no arbitrary-SQL tool.
 
 📖 Full docs: [MCP server guide →](src/scherlok/mcp/README.md)
 
@@ -417,13 +433,15 @@ scherlok watch [-w <url>] [-e <email>]  Detect anomalies and alert
 scherlok ci <url> [opts]        All-in-one CI/CD command (connect + watch + exit code)
 scherlok verify [--table T] [--fail-on L] [--output json] [--record PATH]  Read-only gate: compare, keep the baseline
 scherlok reconcile --source S --target T [--key K] [--sum C] [--tolerance X] [--output json]  Check an output table against its input
+scherlok accept --table T --reason "..." [--yes]  Make the current state the baseline, with a recorded approval
 scherlok dbt [--project-dir .] [--output json]  Profile dbt models from manifest
 scherlok dbt-run-and-watch [--build] [--output json]  Run dbt + profile in one step
 scherlok status [--output json] Quick health dashboard
-scherlok history [--days N] [--runs] [--output json]  Past anomalies, or every run with --runs
+scherlok history [--days N] [--runs | --approvals] [--output json]  Past anomalies, every run, or every approval
 scherlok report [--output json] Detailed profile summary
 scherlok dashboard [--out .html] Generate self-contained HTML report
 scherlok config --store <url>   Set remote storage
+scherlok config --baseline-locked  Only `accept` writes baselines (--no-baseline-locked to undo)
 scherlok demo [--keep] [--output json]  Self-contained demo on a sample DuckDB (no database needed)
 scherlok version                Show version
 ```
