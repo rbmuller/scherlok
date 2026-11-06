@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Fixing a column no longer fails every later run** — a new table with a column NULL in every row gets a WARNING `all_null_column`, and a WARNING reading is learned, so the 100% NULL rate became the baseline. Once the column was filled, the drop to 0% was a CRITICAL `null_rate_change`, and since a CRITICAL reading is never learned, `watch`, `ci` and `verify` failed on every run until someone ran `scherlok accept`. A NULL rate that falls is now at most a WARNING, against the learned baseline and against the last profile alike. It is still reported, since a drop can also be a bug such as a `COALESCE` default, and the next run learns it. A rise keeps its thresholds: WARNING from 10 points, CRITICAL from 30. ([#136](https://github.com/rbmuller/scherlok/issues/136))
+- **Duplicated keys are flagged after the fifth run too** — the distinct ratio of a near-unique column, which shows a join that fans out, was only compared until a table had five readings. From then on the learned distinct count took over, and a fan-out adds rows, not distinct values, so 20% duplicated keys showed up as an INFO `volume_spike` at most. The ratio is now checked first at any history length, with the same thresholds (WARNING from a 10% change, CRITICAL from 50%), and the learned distinct count is compared only when the ratio held. ([#137](https://github.com/rbmuller/scherlok/issues/137))
 
 ## [1.3.0] — 2026-11-05
 
