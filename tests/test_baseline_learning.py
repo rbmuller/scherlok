@@ -19,7 +19,12 @@ import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
-from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL, VOLUME_DROP
+from scherlok.detector.anomaly_types import (
+    ALL_NULL_COLUMN,
+    FRESHNESS_CRITICAL,
+    NULL_RATE_CHANGE,
+    VOLUME_DROP,
+)
 from scherlok.detector.severity import Severity
 from scherlok.service import (
     BASELINE_BLOCKING_SEVERITY,
@@ -295,6 +300,41 @@ def test_ci_and_check_keep_failing_on_retry(warehouse, monkeypatch, command):
     retries = [runner.invoke(app, [command, connection]) for _ in range(3)]
 
     assert [r.exit_code for r in retries] == [1, 1, 1]
+
+
+def _severities(home: Path, anomaly_type: str) -> list[str]:
+    conn = sqlite3.connect(home / STORE_FILENAME)
+    try:
+        rows = conn.execute(
+            "SELECT severity FROM anomalies WHERE anomaly_type = ? ORDER BY id",
+            (anomaly_type,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [severity for (severity,) in rows]
+
+
+@needs_duckdb
+def test_fixing_a_column_learned_as_all_null_is_learned_on_the_next_run(
+    warehouse, isolated_scherlok_dir
+):
+    """#136: a new all-NULL column is a WARNING and is learned, so its fix must not
+    fail every later run as a CRITICAL NULL rate drop."""
+    assert runner.invoke(app, ["investigate"]).exit_code == 0
+    _execute(
+        warehouse,
+        "CREATE TABLE shipments AS "
+        "SELECT CAST(NULL AS BIGINT) AS shipment_id, i AS order_id FROM range(500) t(i)",
+    )
+    created = runner.invoke(app, ["watch"])
+    _execute(warehouse, "UPDATE shipments SET shipment_id = order_id")
+
+    fixed = runner.invoke(app, ["watch"])
+    later = runner.invoke(app, ["watch"])
+
+    assert [created.exit_code, fixed.exit_code, later.exit_code] == [0, 0, 0]
+    assert _severities(isolated_scherlok_dir, ALL_NULL_COLUMN) == [Severity.WARNING.value]
+    assert _severities(isolated_scherlok_dir, NULL_RATE_CHANGE) == [Severity.WARNING.value]
 
 
 @patch("scherlok.cli.get_connector")

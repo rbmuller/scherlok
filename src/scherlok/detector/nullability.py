@@ -41,14 +41,9 @@ def detect_nullability_anomalies(
             return anomalies
 
         delta = abs(current_rate - baseline.center)
-        direction = "increased" if current_rate > baseline.center else "decreased"
-        severity = (
-            Severity.CRITICAL
-            if delta >= NULL_RATE_CRITICAL_DELTA
-            else Severity.WARNING
-            if delta >= NULL_RATE_WARNING_DELTA
-            else Severity.INFO
-        )
+        increased = current_rate > baseline.center
+        direction = "increased" if increased else "decreased"
+        severity = _severity(delta, increased) or Severity.INFO
         anomalies.append(_null_rate_anomaly(
             table,
             column,
@@ -64,15 +59,12 @@ def detect_nullability_anomalies(
         return anomalies
 
     delta = abs(current_rate - stored_rate)
-
-    if delta >= NULL_RATE_CRITICAL_DELTA:
-        severity = Severity.CRITICAL
-    elif delta >= NULL_RATE_WARNING_DELTA:
-        severity = Severity.WARNING
-    else:
+    increased = current_rate > stored_rate
+    severity = _severity(delta, increased)
+    if severity is None:
         return anomalies
 
-    direction = "increased" if current_rate > stored_rate else "decreased"
+    direction = "increased" if increased else "decreased"
     anomalies.append(_null_rate_anomaly(
         table,
         column,
@@ -86,6 +78,20 @@ def detect_nullability_anomalies(
         current_rate,
     ))
     return anomalies
+
+
+def _severity(delta: float, increased: bool) -> Severity | None:
+    """Classify a NULL rate change by its size in percentage points.
+
+    A drop is capped at WARNING: fewer NULLs is also what a fixed column looks
+    like, and a CRITICAL reading is never learned (#116), so a CRITICAL drop
+    would fail every run after the fix.
+    """
+    if delta >= NULL_RATE_CRITICAL_DELTA:
+        return Severity.CRITICAL if increased else Severity.WARNING
+    if delta >= NULL_RATE_WARNING_DELTA:
+        return Severity.WARNING
+    return None
 
 
 def _null_rate_anomaly(
