@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Fixing a column no longer fails every later run** — a new table with a column NULL in every row gets a WARNING `all_null_column`, and a WARNING reading is learned, so the 100% NULL rate became the baseline. Once the column was filled, the drop to 0% was a CRITICAL `null_rate_change`, and since a CRITICAL reading is never learned, `watch`, `ci` and `verify` failed on every run until someone ran `scherlok accept`. A NULL rate that falls is now at most a WARNING, against the learned baseline and against the last profile alike. It is still reported, since a drop can also be a bug such as a `COALESCE` default, and the next run learns it. A rise keeps its thresholds: WARNING from 10 points, CRITICAL from 30. ([#136](https://github.com/rbmuller/scherlok/issues/136))
+
 ## [1.3.0] — 2026-11-05
 
 ### Added

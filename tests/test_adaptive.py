@@ -115,6 +115,25 @@ class TestAdaptiveDetectors:
 
         assert anomalies[0]["severity"] == Severity.WARNING
 
+    def test_adaptive_nullability_large_increase_stays_critical(self):
+        history = _profiles("null_rate", [0.01, 0.02, 0.03, 0.02, 0.01, 0.02])
+
+        anomalies = detect_nullability_anomalies(
+            "t", "col", {"null_rate": 0.45}, {"null_rate": 0.02}, history=history
+        )
+
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+
+    def test_adaptive_nullability_large_decrease_is_capped_at_warning(self):
+        """#136: a NULL rate drop is reported, but never fails a run as CRITICAL."""
+        history = _profiles("null_rate", [0.40, 0.42, 0.41, 0.43, 0.40, 0.42])
+
+        anomalies = detect_nullability_anomalies(
+            "t", "col", {"null_rate": 0.0}, {"null_rate": 0.42}, history=history
+        )
+
+        assert anomalies[0]["severity"] == Severity.WARNING
+
     def test_adaptive_cardinality_preserves_effect_size_severity(self):
         history = _profiles("distinct_count", [98, 99, 100, 101, 102, 100])
 

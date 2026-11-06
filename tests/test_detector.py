@@ -222,6 +222,14 @@ class TestNullabilityDetector:
         assert len(anomalies) == 1
         assert "decreased" in anomalies[0]["message"]
 
+    def test_large_decrease_is_capped_at_warning(self):
+        """#136: a fixed all-NULL column must not fail every run as CRITICAL."""
+        current = {"null_rate": 0.0}
+        stored = {"null_rate": 1.0}
+        anomalies = detect_nullability_anomalies("t", "col", current, stored)
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.WARNING
+
     def test_no_anomaly_when_none(self):
         current = {"null_rate": None}
         stored = {"null_rate": 0.02}

@@ -49,6 +49,8 @@ This holds for `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `w
 
 `freshness_critical` is the exception and is learned like a warning. Freshness compares a table's age with its age on the previous run, so keeping the old reading would report a table updated less often than it is watched, such as a weekly table watched daily, on every run until its next update.
 
+A NULL rate that falls is at most a WARNING, however far it falls. Fewer NULLs is also what a fixed column looks like: a new column that was NULL in every row is learned as a WARNING, so a CRITICAL for its fix would fail every run after it.
+
 ## Accepting a change
 
 ```bash
