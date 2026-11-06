@@ -24,7 +24,7 @@ uvx --from "scherlok[duckdb]" scherlok demo
 | Freshness | Table hasn't updated in 12h (normally every 2h) | CRITICAL |
 | Schema drift | Column removed or type changed | CRITICAL |
 | NULL surge | NULL rate jumped from 2% to 45% | CRITICAL |
-| Distribution shift | Column mean moved 3+ standard deviations | INFO, WARNING above 5σ |
+| Distribution shift | Column mean of a numeric column moved 3+ standard deviations and at least 1% | INFO, WARNING above 5σ |
 | Cardinality explosion | Status column went from 5 values to 500 | CRITICAL |
 | Broken new table | First sighting, no baseline yet: empty, a column NULL in every row, or duplicates in `id` / `<table>_id` | WARNING (CRITICAL under `verify --table`) |
 | Constant column | First sighting: one value in 100+ non-NULL rows | INFO |

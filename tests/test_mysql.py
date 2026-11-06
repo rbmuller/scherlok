@@ -161,52 +161,122 @@ def test_get_columns(connector):
 # Test 6 — get_column_stats returns null_count, distinct_count, mean, etc.
 # ---------------------------------------------------------------------------
 
-def test_get_column_stats_numeric(connector):
-    c, fake_conn = connector
-
+def _wire_stats_cursor(fake_conn, *rows):
+    """A cursor whose fetchone returns ``rows`` in order: the null/distinct counts,
+    the column's type, then the numeric stats when the connector asks for them."""
     cur = MagicMock()
-    # fetchone called twice: null/distinct, then numeric stats
-    cur.fetchone.side_effect = [
-        {"null_count": 2, "distinct_count": 50},
-        {"mean": 10.5, "stddev": 1.2},
-    ]
+    cur.fetchone.side_effect = list(rows)
     ctx = MagicMock()
     ctx.__enter__ = MagicMock(return_value=cur)
     ctx.__exit__ = MagicMock(return_value=False)
     fake_conn.cursor.return_value = ctx
+    return cur
+
+
+def _executed(cur) -> list[str]:
+    return [call.args[0] for call in cur.execute.call_args_list]
+
+
+def test_get_column_stats_numeric(connector):
+    c, fake_conn = connector
+    cur = _wire_stats_cursor(
+        fake_conn,
+        {"null_count": 2, "distinct_count": 50},
+        {"DATA_TYPE": "decimal", "COLUMN_TYPE": "decimal(10,2)"},
+        {"mean": 10.5, "stddev": 1.2},
+    )
 
     stats = c.get_column_stats("orders", "amount")
 
     assert stats == {"null_count": 2, "distinct_count": 50, "mean": 10.5, "stddev": 1.2}
+    type_lookup = cur.execute.call_args_list[1]
+    assert "information_schema.COLUMNS" in type_lookup.args[0]
+    assert type_lookup.args[1] == ("testdb", "orders", "amount")
+
+
+@pytest.mark.parametrize(
+    ("data_type", "column_type"),
+    [
+        ("int", "int"),
+        ("bigint", "bigint unsigned"),
+        ("tinyint", "tinyint"),
+        ("double", "double"),
+        ("float", "float"),
+    ],
+)
+def test_get_column_stats_averages_numeric_types(connector, data_type, column_type):
+    c, fake_conn = connector
+    cur = _wire_stats_cursor(
+        fake_conn,
+        {"null_count": 0, "distinct_count": 5},
+        {"DATA_TYPE": data_type, "COLUMN_TYPE": column_type},
+        {"mean": 3.0, "stddev": 1.0},
+    )
+
+    stats = c.get_column_stats("t", "c")
+
+    assert stats["mean"] == 3.0
+    assert any("AVG(" in sql for sql in _executed(cur))
+
+
+@pytest.mark.parametrize(
+    ("data_type", "column_type"),
+    [
+        ("date", "date"),
+        ("datetime", "datetime"),
+        ("timestamp", "timestamp"),
+        ("varchar", "varchar(255)"),
+        ("tinyint", "tinyint(1)"),  # BOOLEAN
+        ("year", "year"),
+        ("bit", "bit(1)"),
+    ],
+)
+def test_get_column_stats_skips_the_mean_of_non_numeric_types(connector, data_type, column_type):
+    """#138: MySQL's AVG accepts dates, text and booleans without an error, and a
+    DATETIME averages as a number like 2.02609e13, so their means only made noise."""
+    c, fake_conn = connector
+    cur = _wire_stats_cursor(
+        fake_conn,
+        {"null_count": 0, "distinct_count": 5},
+        {"DATA_TYPE": data_type, "COLUMN_TYPE": column_type},
+    )
+
+    stats = c.get_column_stats("t", "c")
+
+    assert stats == {"null_count": 0, "distinct_count": 5, "mean": None, "stddev": None}
+    assert not any("AVG(" in sql for sql in _executed(cur))
+
+
+def test_get_column_stats_unknown_column_type_skips_the_mean(connector):
+    c, fake_conn = connector
+    _wire_stats_cursor(fake_conn, {"null_count": 0, "distinct_count": 5}, None)
+
+    stats = c.get_column_stats("t", "c")
+
+    assert stats["mean"] is None
+    assert stats["stddev"] is None
 
 
 def test_get_column_stats_text_column_returns_no_values(connector):
-    """MySQL's AVG/STDDEV coerce text to DOUBLE (non-numeric strings count as 0),
-    so the stats query succeeds on a text column. Its MIN/MAX would have
-    returned real strings, so the connector must not ask for them at all."""
+    """Its MIN/MAX would have returned real strings, so the connector must not ask
+    for them, nor for the values themselves."""
     c, fake_conn = connector
     sentinel = "sentinel.person@example.invalid"
-
-    cur = MagicMock()
-    # What the server would hand back if the connector still asked for values.
-    cur.fetchone.side_effect = [
+    cur = _wire_stats_cursor(
+        fake_conn,
         {"null_count": 0, "distinct_count": 3},
+        {"DATA_TYPE": "varchar", "COLUMN_TYPE": "varchar(255)"},
+        # What the server would hand back if the connector still asked for values.
         {"mean": 0.0, "stddev": 0.0, "min": sentinel, "max": sentinel},
-    ]
+    )
     cur.fetchall.return_value = [{"val": sentinel, "cnt": 3}]
-    ctx = MagicMock()
-    ctx.__enter__ = MagicMock(return_value=cur)
-    ctx.__exit__ = MagicMock(return_value=False)
-    fake_conn.cursor.return_value = ctx
 
     stats = c.get_column_stats("users", "email")
 
-    assert stats == {"null_count": 0, "distinct_count": 3, "mean": 0.0, "stddev": 0.0}
+    assert stats == {"null_count": 0, "distinct_count": 3, "mean": None, "stddev": None}
     assert sentinel not in repr(stats)
     cur.fetchall.assert_not_called()
-    executed = [call.args[0] for call in cur.execute.call_args_list]
-    assert len(executed) == 2
-    for sql in executed:
+    for sql in _executed(cur):
         assert "MIN(" not in sql
         assert "MAX(" not in sql
         assert "GROUP BY" not in sql

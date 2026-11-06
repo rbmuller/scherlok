@@ -8,6 +8,11 @@ from scherlok.detector.anomaly_types import DISTRIBUTION_SHIFT
 from scherlok.detector.fields import METRIC_MEAN, make_anomaly
 from scherlok.detector.severity import Severity, classify_distribution_shift
 
+# A mean that moved less than this, relative to the baseline, is not reported,
+# whatever its score. On a cumulative table the mean barely moves between runs,
+# so a 0.03% move can score far above the threshold (#138).
+MEAN_SHIFT_MIN_PCT = 1.0
+
 
 def detect_distribution_shift(
     table: str,
@@ -20,8 +25,9 @@ def detect_distribution_shift(
     """Compare current column distribution against stored profile.
 
     Uses z-score on the mean shift relative to the stored stddev.
-    Returns anomalies when distribution shifts significantly. ``baseline``
-    and ``current`` are column means, never a value read from a row.
+    Returns anomalies when distribution shifts significantly and the mean
+    moved at least ``MEAN_SHIFT_MIN_PCT`` of the baseline. ``baseline`` and
+    ``current`` are column means, never a value read from a row.
     """
     anomalies: list[dict] = []
 
@@ -37,6 +43,8 @@ def detect_distribution_shift(
     if baseline is not None:
         z = baseline.score(current_mean)
         if z is None or abs(z) <= ADAPTIVE_SCORE_THRESHOLD:
+            return anomalies
+        if _below_min_shift(current_mean, baseline.center):
             return anomalies
 
         severity = classify_distribution_shift(z)
@@ -63,7 +71,7 @@ def detect_distribution_shift(
         return anomalies
 
     abs_z = abs(z)
-    if abs_z <= 3.0:
+    if abs_z <= 3.0 or _below_min_shift(current_mean, stored_mean):
         return anomalies
 
     severity = classify_distribution_shift(z)
@@ -103,3 +111,10 @@ def _shift_anomaly(
         baseline=baseline,
         current=current,
     )
+
+
+def _below_min_shift(current: float, baseline: float) -> bool:
+    """Whether the mean moved less than ``MEAN_SHIFT_MIN_PCT`` of a non-zero baseline."""
+    if baseline == 0:
+        return False
+    return abs(current - baseline) / abs(baseline) * 100 < MEAN_SHIFT_MIN_PCT

@@ -148,7 +148,7 @@ A dev build often runs on a sample (a date window, one tenant, a `LIMIT`), so it
 
 - **Row counts** are not compared (`volume_drop`, `volume_spike`). A table with rows in the baseline and none now is still reported, as a `table_empty` WARNING: a sample can miss a sparse table, but a broken join empties one too.
 - **Cardinality** compares the distinct ratio of near-unique columns, so duplicates in an `id` are still caught, and flags a column with 50% more distinct values than the baseline or more, since a sample can only lose values. Fewer distinct values pass.
-- **NULL rates and means** are compared with the latest baseline profile rather than the spread learned from its history, which is the full table's run-to-run variation and far tighter than a sample's error. A NULL rate 10 points off, or a mean more than 3 standard deviations off, is still reported.
+- **NULL rates and means** are compared with the latest baseline profile rather than the spread learned from its history, which is the full table's run-to-run variation and far tighter than a sample's error. A NULL rate 10 points off, or a mean more than 3 standard deviations and at least 1% off, is still reported.
 - **Schema** checks are unchanged: a dropped column or a changed type is CRITICAL.
 
 `--ignore volume` also works without `--against`.
