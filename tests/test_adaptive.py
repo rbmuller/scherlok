@@ -8,6 +8,7 @@ from scherlok.detector.adaptive import adaptive_baseline
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.cardinality import detect_cardinality_anomalies
 from scherlok.detector.distribution_shift import detect_distribution_shift
+from scherlok.detector.fields import METRIC_DISTINCT_COUNT, METRIC_DISTINCT_RATIO
 from scherlok.detector.nullability import detect_nullability_anomalies
 from scherlok.detector.severity import Severity
 
@@ -142,6 +143,48 @@ class TestAdaptiveDetectors:
         )
 
         assert anomalies[0]["severity"] == Severity.CRITICAL
+
+    # A unique key on a table that grew by 300 rows per run.
+    UNIQUE_HISTORY = _profiles("distinct_count", [10000, 10300, 10600, 10900, 11200, 11500])
+    UNIQUE_STORED = {"distinct_count": 11500, "null_count": 0}
+    UNIQUE_STORED_VOL = {"row_count": 11500}
+
+    def test_adaptive_cardinality_flags_duplicates_in_a_unique_column(self):
+        """#137: a join fan-out keeps the distinct count on its learned path, so only
+        the distinct ratio shows it."""
+        anomalies = detect_cardinality_anomalies(
+            "t", "id",
+            {"distinct_count": 11800, "null_count": 0}, self.UNIQUE_STORED,
+            {"row_count": 14160}, self.UNIQUE_STORED_VOL,
+            history=self.UNIQUE_HISTORY,
+        )
+
+        assert len(anomalies) == 1
+        assert anomalies[0]["severity"] == Severity.WARNING
+        assert anomalies[0]["metric"] == METRIC_DISTINCT_RATIO
+
+    def test_adaptive_cardinality_unique_column_that_grows_is_silent(self):
+        anomalies = detect_cardinality_anomalies(
+            "t", "id",
+            {"distinct_count": 11800, "null_count": 0}, self.UNIQUE_STORED,
+            {"row_count": 11800}, self.UNIQUE_STORED_VOL,
+            history=self.UNIQUE_HISTORY,
+        )
+
+        assert anomalies == []
+
+    def test_adaptive_cardinality_keeps_the_learned_path_for_other_columns(self):
+        history = _profiles("distinct_count", [98, 99, 100, 101, 102, 100])
+
+        anomalies = detect_cardinality_anomalies(
+            "t", "status",
+            {"distinct_count": 500}, {"distinct_count": 100},
+            {"row_count": 1000}, {"row_count": 1000},
+            history=history,
+        )
+
+        assert anomalies[0]["severity"] == Severity.CRITICAL
+        assert anomalies[0]["metric"] == METRIC_DISTINCT_COUNT
 
     def test_table_empty_remains_critical(self):
         history = _profiles("row_count", [98, 99, 100, 101, 102, 100])
