@@ -97,7 +97,7 @@ class DuckDBConnector(BaseConnector):
 
     def get_row_count(self, table: str) -> int:
         """Return exact row count for a table."""
-        quoted_table = self._quote_identifier(table)
+        quoted_table = self._quote_listed_table(table)
         row = self._conn.execute(f"SELECT COUNT(*) AS cnt FROM {quoted_table}").fetchone()
         return int(row[0])
 
@@ -106,9 +106,9 @@ class DuckDBConnector(BaseConnector):
         rows = self._conn.execute(
             "SELECT column_name, data_type, is_nullable "
             "FROM information_schema.columns "
-            "WHERE table_schema = 'main' AND table_name = ? "
+            "WHERE table_schema = ? AND table_name = ? "
             "ORDER BY ordinal_position",
-            (table,),
+            (MAIN_SCHEMA, table),
         ).fetchall()
         return [
             {
@@ -122,7 +122,7 @@ class DuckDBConnector(BaseConnector):
     def get_column_stats(self, table: str, column: str) -> dict:
         """Calculate statistics for a numeric or text column."""
         stats: dict[str, Any] = {}
-        quoted_table = self._quote_identifier(table)
+        quoted_table = self._quote_listed_table(table)
         quoted_column = self._quote_identifier(column)
 
         row = self._conn.execute(

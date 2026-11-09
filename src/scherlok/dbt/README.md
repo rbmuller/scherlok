@@ -41,7 +41,7 @@ scherlok dbt --project-dir . --connection-string "postgresql://user:pw@host/db/a
 
 ## Matching models to tables
 
-A connection lists the tables of one database and schema: the PostgreSQL schema in the connection string (`postgresql://host/db/analytics`, `public` when left out), the MySQL database, DuckDB's `main` schema, the BigQuery dataset or the Snowflake schema. A model matches a listed table when its alias (or name) does and dbt built it in that schema and database, compared without case. A model built in another schema, such as a custom `+schema` folder, is reported as not found instead of being matched to a table of the same name somewhere else.
+A connection lists the tables of one database and schema: the PostgreSQL schema in the connection string (`postgresql://host/db/analytics`, `public` when left out), the MySQL database, DuckDB's `main` schema (the only one Scherlok reads), the BigQuery dataset or the Snowflake schema. A model matches a listed table when its alias does and dbt built it in that schema and database, compared without case when only one listed name fits. A model built in another schema, such as a custom `+schema` folder, is reported as not found instead of being matched to a table of the same name somewhere else.
 
 ## Connection resolution
 

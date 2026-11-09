@@ -42,7 +42,12 @@ from scherlok.config import BASELINE_LOCKED_SETTING, ENV_BASELINE_LOCKED, Scherl
 from scherlok.connectors import get_connector
 from scherlok.connectors.base import UNKNOWN_NAMESPACE, RelationNamespace
 from scherlok.dbt.manifest import DEFAULT_TARGET_PATH
-from scherlok.dbt.relations import ambiguous_identifiers, resolve_relation
+from scherlok.dbt.relations import (
+    VisibleTables,
+    ambiguous_identifiers,
+    manifest_relations,
+    resolve_relation,
+)
 from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.fields import anomaly_details
@@ -784,13 +789,14 @@ class DbtScope:
 
     project_dir: Path
     models: list[DbtNode]
+    ambiguous: set[str] = field(default_factory=set)
     tables: list[str] = field(default_factory=list)
     not_found: list[str] = field(default_factory=list)
 
     def resolve(self, visible: set[str], namespace: RelationNamespace) -> None:
-        ambiguous = ambiguous_identifiers(self.models)
+        tables = VisibleTables(visible)
         for node in self.models:
-            physical = resolve_relation(node, visible, namespace, ambiguous)
+            physical = resolve_relation(node, tables, namespace, self.ambiguous)
             if physical is None:
                 self.not_found.append(node.name)
             else:
@@ -799,14 +805,19 @@ class DbtScope:
 
 def _dbt_scope_or_exit(project_dir: Path, target_path: str) -> DbtScope:
     """Read the models that succeeded in the project's last dbt run, or exit 1."""
-    from scherlok.dbt import built_models
+    from scherlok.dbt import built_models, load_manifest
 
     try:
-        models = built_models(project_dir, target_path=target_path)
+        manifest = load_manifest(project_dir, target_path=target_path)
+        models = built_models(project_dir, target_path=target_path, manifest=manifest)
     except (OSError, ValueError) as exc:
         out_error(f"[red]{rich_escape(str(exc))}[/red]")
         raise typer.Exit(code=1) from exc
-    return DbtScope(project_dir=project_dir, models=models)
+    return DbtScope(
+        project_dir=project_dir,
+        models=models,
+        ambiguous=ambiguous_identifiers(manifest_relations(manifest)),
+    )
 
 
 def _print_dbt_scope(scope: DbtScope) -> None:
@@ -1529,9 +1540,9 @@ def _dbt_impl(
         raise typer.Exit(code=1)
 
     # 3. Match models to physical tables visible to the connector
-    visible = set(connector.list_tables())
+    visible = VisibleTables(connector.list_tables())
     namespace = _connector_namespace(connector)
-    ambiguous = ambiguous_identifiers(nodes)
+    ambiguous = ambiguous_identifiers(manifest_relations(manifest))
     matched: list[tuple[DbtNode, str]] = []
     missing: list[DbtNode] = []
     for node in nodes:

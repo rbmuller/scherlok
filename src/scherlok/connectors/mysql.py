@@ -120,7 +120,7 @@ class MySQLConnector(BaseConnector):
 
     def get_row_count(self, table: str) -> int:
         """Return exact row count for a table."""
-        quoted_table = self._quote_identifier(table)
+        quoted_table = self._quote_listed_table(table)
         with self._cursor() as cur:
             cur.execute(f"SELECT COUNT(*) AS cnt FROM {quoted_table}")  # noqa: S608
             return cur.fetchone()["cnt"]
@@ -147,7 +147,7 @@ class MySQLConnector(BaseConnector):
 
     def get_column_stats(self, table: str, column: str) -> dict:
         """Calculate statistics for a column; mean and stddev only for numeric types."""
-        quoted_table = self._quote_identifier(table)
+        quoted_table = self._quote_listed_table(table)
         quoted_column = self._quote_identifier(column)
         stats: dict[str, Any] = {}
         with self._cursor() as cur:

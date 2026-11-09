@@ -59,16 +59,21 @@ def successful_model_unique_ids_from_results(
 
 
 def built_models(
-    project_dir: str | Path, *, target_path: str | Path = DEFAULT_TARGET_PATH
+    project_dir: str | Path,
+    *,
+    target_path: str | Path = DEFAULT_TARGET_PATH,
+    manifest: dict | None = None,
 ) -> list[DbtNode]:
     """The materialized models that succeeded in the project's last dbt invocation.
 
     The same join as `dbt-run-and-watch`: run_results.json says which model
     nodes succeeded, manifest.json what each one is called. Raises like
     `load_manifest` and `load_run_results` when an artifact is missing or
-    malformed.
+    malformed. ``manifest`` is the project's manifest when the caller already
+    loaded it.
     """
-    manifest = load_manifest(project_dir, target_path=target_path)
+    if manifest is None:
+        manifest = load_manifest(project_dir, target_path=target_path)
     succeeded = successful_model_unique_ids(
         load_run_results(project_dir, target_path=target_path)
     )

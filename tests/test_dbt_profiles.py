@@ -145,3 +145,17 @@ def test_resolve_duckdb_in_memory_raises(tmp_path):
     with pytest.raises(ProfileResolutionError, match="in-memory"):
         resolve_connection_string(project, profiles_dir=profiles)
 
+
+
+def test_resolve_duckdb_path_survives_url_characters(tmp_path):
+    """A `#` in a folder name used to end the URL early, so the connector opened
+    another file (#145 review)."""
+    from scherlok.connectors.duckdb import DuckDBConnector
+
+    project, profiles = _project_with_profile(
+        tmp_path, "      type: duckdb\n      path: 'build #2/wh.duckdb'\n"
+    )
+    conn = resolve_connection_string(project, profiles_dir=profiles)
+
+    expected = (project / "build #2" / "wh.duckdb").resolve()
+    assert DuckDBConnector(conn)._database_path().replace("//", "/", 1) == expected.as_posix()

@@ -16,6 +16,7 @@ from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from scherlok.alerter.exitcode import FAIL_ON_CRITICAL, fails_gate, normalize_fail_on
 from scherlok.connectors.base import BaseConnector
+from scherlok.connectors.postgres import DEFAULT_SCHEMA as POSTGRES_DEFAULT_SCHEMA
 from scherlok.detector.adaptive import ADAPTIVE_HISTORY_LIMIT
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.anomaly_types import FRESHNESS_CRITICAL, TABLE_EMPTY
@@ -81,10 +82,11 @@ REDACTED = "***"
 SECRET_QUERY_KEY_PARTS = ("password", "passwd", "pwd", "token", "secret", "key")
 
 # Spellings of one adapter that must share a scope.
-SCOPE_SCHEME_ALIASES = {"postgres": "postgresql"}
+SCOPE_SCHEME_POSTGRES = "postgresql"
+SCOPE_SCHEME_ALIASES = {"postgres": SCOPE_SCHEME_POSTGRES}
 # A port equal to the adapter's default is left out of the scope, so
 # `host/db` and `host:5432/db` (as `scherlok dbt` writes it) are one database.
-SCOPE_DEFAULT_PORTS = {"postgresql": 5432, "mysql": 3306}
+SCOPE_DEFAULT_PORTS = {SCOPE_SCHEME_POSTGRES: 5432, "mysql": 3306}
 
 
 class UnknownTablesError(ValueError):
@@ -524,7 +526,12 @@ def connection_scope(connection_string: str | None) -> str | None:
         host = f"[{host}]"
     if port is not None and port != SCOPE_DEFAULT_PORTS.get(scheme):
         host = f"{host}:{port}"
-    return f"{scheme}://{host}{parts.path.rstrip('/')}"
+    path = parts.path.rstrip("/")
+    segments = path.strip("/").split("/")
+    if scheme == SCOPE_SCHEME_POSTGRES and segments[1:] == [POSTGRES_DEFAULT_SCHEMA]:
+        # `/shop/public` is `/shop`: the same tables keep the same baselines (#68).
+        path = f"/{segments[0]}"
+    return f"{scheme}://{host}{path}"
 
 
 def anomaly_to_dict(anomaly: dict) -> dict[str, Any]:
