@@ -64,12 +64,11 @@ def built_models(
     """The materialized models that succeeded in the project's last dbt invocation.
 
     The same join as `dbt-run-and-watch`: run_results.json says which model
-    nodes succeeded, manifest.json what each one is called. The adapter is not
-    checked, because the caller brings its own connection rather than
-    resolving profiles.yml. Raises like `load_manifest` and `load_run_results`
-    when an artifact is missing or malformed.
+    nodes succeeded, manifest.json what each one is called. Raises like
+    `load_manifest` and `load_run_results` when an artifact is missing or
+    malformed.
     """
-    manifest = load_manifest(project_dir, target_path=target_path, check_adapter=False)
+    manifest = load_manifest(project_dir, target_path=target_path)
     succeeded = successful_model_unique_ids(
         load_run_results(project_dir, target_path=target_path)
     )

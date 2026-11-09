@@ -4,7 +4,12 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from scherlok.connectors.base import TABLE_NAME_SEPARATOR, BaseConnector, quote_ansi_identifier
+from scherlok.connectors.base import (
+    TABLE_NAME_SEPARATOR,
+    BaseConnector,
+    RelationNamespace,
+    quote_ansi_identifier,
+)
 
 # Metadata of the connection's database, read by `list_tables`, `get_columns`
 # and `get_last_modified`.
@@ -173,6 +178,10 @@ class SnowflakeConnector(BaseConnector):
     def _fetch_one(self, sql: str) -> dict[str, Any]:
         """Run ``sql`` and return its single row keyed by lower-case column alias."""
         return self._query(sql)[0]
+
+    def namespace(self) -> RelationNamespace:
+        """The database and schema of the connection string."""
+        return RelationNamespace(database=self._database, schema=self._schema)
 
     def list_tables(self) -> list[str]:
         """List all tables and views in the schema."""

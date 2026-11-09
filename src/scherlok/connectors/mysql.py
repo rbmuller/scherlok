@@ -13,7 +13,7 @@ except ImportError as exc:
         "Install it with: pip install scherlok[mysql]"
     ) from exc
 
-from scherlok.connectors.base import BaseConnector
+from scherlok.connectors.base import BaseConnector, RelationNamespace
 
 # DATA_TYPE values whose mean means something. MySQL's AVG also accepts dates,
 # text and booleans (TINYINT(1)) without an error, so their means were noise (#138).
@@ -91,6 +91,10 @@ class MySQLConnector(BaseConnector):
     def _database(self) -> str:
         """The database named in the connection string."""
         return urlparse(self.connection_string).path.lstrip("/")
+
+    def namespace(self) -> RelationNamespace:
+        """In MySQL a schema is a database; dbt names it as the schema."""
+        return RelationNamespace(schema=self._database())
 
     def _fetch_one(self, sql: str) -> dict[str, Any]:
         """Run ``sql`` and return its single row keyed by column alias."""

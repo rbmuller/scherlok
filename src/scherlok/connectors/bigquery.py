@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from scherlok.connectors.base import TABLE_NAME_SEPARATOR, BaseConnector
+from scherlok.connectors.base import TABLE_NAME_SEPARATOR, BaseConnector, RelationNamespace
 
 _BACKSLASH = "\\"
 _BACKTICK = "`"
@@ -146,6 +146,10 @@ class BigQueryConnector(BaseConnector):
     def _fetch_one(self, sql: str) -> dict[str, Any]:
         """Run ``sql`` and return its single row keyed by column alias."""
         return self._query(sql)[0]
+
+    def namespace(self) -> RelationNamespace:
+        """The project and dataset of the connection string."""
+        return RelationNamespace(database=self._project, schema=self._dataset)
 
     def list_tables(self) -> list[str]:
         """List all tables in the dataset."""

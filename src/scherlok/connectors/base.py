@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -24,6 +25,17 @@ _KEY_ROWS = "key_rows"
 _UNMATCHED_KEYS = "unmatched_keys"
 _SUM_ALIAS = "sum_{}"
 _LATEST_ALIAS = "latest"
+
+
+@dataclass(frozen=True)
+class RelationNamespace:
+    """The database and schema whose tables `list_tables` returns; None where unknown."""
+
+    database: str | None = None
+    schema: str | None = None
+
+
+UNKNOWN_NAMESPACE = RelationNamespace()
 
 
 class InvalidTableNameError(ValueError):
@@ -104,6 +116,10 @@ class BaseConnector(ABC):
     def get_last_modified(self, table: str) -> datetime | None:
         """Return the last known modification time for a table, or None."""
         ...
+
+    def namespace(self) -> RelationNamespace:
+        """Where `list_tables` looks, so a dbt relation can be matched to it (#68)."""
+        return UNKNOWN_NAMESPACE
 
     # Whether `get_last_modified` is the time of the last write. A connector
     # whose metadata is a maintenance time or a cached value says False, and

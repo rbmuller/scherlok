@@ -105,3 +105,43 @@ def test_target_not_found(tmp_path):
     )
     with pytest.raises(ProfileResolutionError, match="Target 'staging' not found"):
         resolve_connection_string(project, profiles_dir=profiles, target="staging")
+
+
+def _project_with_profile(tmp_path, output_yaml: str) -> tuple[Path, Path]:
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "dbt_project.yml").write_text("name: x\nprofile: x\n")
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "profiles.yml").write_text(
+        "x:\n  target: dev\n  outputs:\n    dev:\n" + output_yaml
+    )
+    return project, profiles
+
+
+def test_resolve_postgres_target_schema_into_the_url(tmp_path):
+    """#68: the PostgreSQL connector lists the schema dbt builds in."""
+    project, profiles = _project_with_profile(
+        tmp_path,
+        "      type: postgres\n      host: db\n      user: u\n      password: p\n"
+        "      port: 5432\n      dbname: shop\n      schema: dbt_alice\n",
+    )
+    conn = resolve_connection_string(project, profiles_dir=profiles)
+    assert conn == "postgresql://u:p@db:5432/shop/dbt_alice"
+
+
+def test_resolve_duckdb_profile_relative_to_the_project(tmp_path):
+    project, profiles = _project_with_profile(
+        tmp_path, "      type: duckdb\n      path: warehouse.duckdb\n"
+    )
+    conn = resolve_connection_string(project, profiles_dir=profiles)
+    assert conn == f"duckdb:///{(project / 'warehouse.duckdb').resolve()}"
+
+
+def test_resolve_duckdb_in_memory_raises(tmp_path):
+    project, profiles = _project_with_profile(
+        tmp_path, "      type: duckdb\n      path: ':memory:'\n"
+    )
+    with pytest.raises(ProfileResolutionError, match="in-memory"):
+        resolve_connection_string(project, profiles_dir=profiles)
+

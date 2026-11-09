@@ -160,6 +160,34 @@ def test_a_model_the_connection_cannot_see_is_reported_not_failed(warehouse, pro
     assert "dbt models not on this connection, not verified (1): int_orders" in text.output
 
 
+def test_a_model_built_in_another_schema_is_not_the_table_of_its_name(warehouse, project):
+    """#68: dbt built staging.fct_orders; the connection lists main.fct_orders, which
+    the old match by bare name verified in its place."""
+    staging_model = {**_model("fct_orders"), "schema": "staging"}
+    _write_artifacts(project, {"fct_orders": staging_model}, {"fct_orders": "success"})
+
+    result, payload = _verify("--dbt-project", str(project))
+
+    assert result.exit_code == 0
+    assert payload["tables_verified"] == []
+    assert payload["dbt_models_not_found"] == ["fct_orders"]
+
+
+def test_scherlok_dbt_reads_a_duckdb_project(warehouse, project):
+    """#68: the manifest's adapter is no longer checked against an allowlist."""
+    _write_artifacts(project, {"fct_orders": _model("fct_orders")}, {"fct_orders": "success"})
+    (project / "dbt_project.yml").write_text(f"name: {PROJECT}\nprofile: {PROJECT}\n")
+
+    result = runner.invoke(app, [
+        "dbt", "--project-dir", str(project),
+        "--connection-string", f"duckdb:///{warehouse}", "--output", "json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [model["physical"] for model in payload["models"]] == ["fct_orders"]
+
+
 def test_ephemeral_models_are_skipped(warehouse, project):
     _write_artifacts(
         project, {"eph": _model("eph", materialized="ephemeral")}, {"eph": "success"}
@@ -227,5 +255,4 @@ def test_built_models_reads_any_adapter(project):
         project, {"fct_orders": _model("fct_orders")}, {"fct_orders": "success"}, adapter="mysql"
     )
     assert [node.name for node in built_models(project)] == ["fct_orders"]
-    with pytest.raises(ValueError, match="Unsupported dbt adapter 'mysql'"):
-        load_manifest(project)
+    assert load_manifest(project)["metadata"]["adapter_type"] == "mysql"

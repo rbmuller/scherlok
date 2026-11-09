@@ -2,7 +2,7 @@
 
 | Database | Extra | Connection string |
 |---|---|---|
-| PostgreSQL | built in | `postgres://user:pass@host:5432/db` |
+| PostgreSQL | built in | `postgres://user:pass@host:5432/db`, or `…/db/schema` for a schema other than `public` |
 | BigQuery | `scherlok[bigquery]` | `bigquery://project-id/dataset-name` |
 | Snowflake | `scherlok[snowflake]` | `snowflake://account/database/schema` (credentials via `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_WAREHOUSE`) |
 | MySQL | `scherlok[mysql]` | `mysql://user:pass@host:3306/dbname` |

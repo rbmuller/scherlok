@@ -38,6 +38,7 @@ SNOWFLAKE_TABLE = r'''"DB"."SCHEMA"."ORDERS""\`\'; DROP TABLE USERS; --"'''
 SNOWFLAKE_COLUMN = r'''"AMOUNT""\`\'; DROP TABLE USERS; --"'''
 
 MYSQL_DATABASE = "shop"
+POSTGRES_DEFAULT_SCHEMA = "public"
 SNOWFLAKE_SCHEMA = "SCHEMA"
 SNOWFLAKE_TABLES_SQL = (
     'SELECT table_name FROM "{database}".information_schema.tables '
@@ -184,7 +185,7 @@ def test_postgres_metadata_lookups_bind_the_table_name():
     connector.get_last_modified(HOSTILE_TABLE)
 
     for sql, params in _executed(cur.execute):
-        assert params == (HOSTILE_TABLE,)
+        assert params == (POSTGRES_DEFAULT_SCHEMA, HOSTILE_TABLE)
         assert HOSTILE_TABLE not in sql
 
 

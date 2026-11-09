@@ -161,16 +161,16 @@ def test_discover_exposures_empty_when_none():
     assert discover_exposures(manifest) == []
 
 
-def test_load_manifest_unsupported_adapter(tmp_path):
-    """An adapter outside postgres/bigquery/snowflake should raise."""
+def test_load_manifest_accepts_any_adapter(tmp_path):
+    """#68: the connection comes from profiles.yml or --connection-string, which
+    say when they can't resolve one; the manifest itself loads for any adapter."""
     target = tmp_path / "target"
     target.mkdir()
     (target / "manifest.json").write_text(
         '{"metadata": {"dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",'
         '"adapter_type": "redshift"}, "nodes": {}, "sources": {}}'
     )
-    with pytest.raises(ValueError, match="Unsupported dbt adapter 'redshift'"):
-        load_manifest(tmp_path)
+    assert load_manifest(tmp_path)["metadata"]["adapter_type"] == "redshift"
 
 
 def _manifest_with_snapshot() -> dict:
