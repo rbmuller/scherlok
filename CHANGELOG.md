@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-11-09
+
 ### Added
 - **GitLab CI and CircleCI examples for the data gate** — the docs showed the gate for GitHub Actions only. [CI/CD](https://rbmuller.github.io/scherlok/ci-cd/) now has a copy-paste `.gitlab-ci.yml` and `.circleci/config.yml`: a merge request or branch job that runs `scherlok verify` with the connection in a masked variable and the run record kept as an artifact, a scheduled job on the default branch that keeps the baseline learning with `scherlok watch`, and a dbt variant that verifies what `dbt run` built against production's baseline (`verify --dbt-project . --against`). Both validate against GitLab's and CircleCI's published configuration schemas, and a test parses them and checks that no example puts the connection on the command line. ([#88](https://github.com/rbmuller/scherlok/issues/88), [#89](https://github.com/rbmuller/scherlok/issues/89))
 - **Freshness on DuckDB, from a load-time column** — DuckDB keeps no per-table modification time, so freshness never fired there, and a pipeline that stopped loading went unnoticed. When a connector has no last-modified time, freshness now reads `MAX()` of the table's load-time column in one query: the first of `updated_at`, `modified_at`, `dbt_updated_at`, `loaded_at`, `_loaded_at`, `_etl_loaded_at`, `synced_at`, `_fivetran_synced`, `_airbyte_extracted_at`, `_sdc_batched_at`, `ingested_at`, `inserted_at` and `created_at` it has, in any case. No other column is read, since the saved age gives the column's latest value away. A timestamp without a time zone is read as UTC, one in the future counts as just updated, DuckDB `TIMESTAMPTZ` columns are read without `pytz`, and MySQL sessions run in UTC so `TIMESTAMP` columns arrive in UTC. A column the warehouse can't aggregate falls back to the metadata instead of stopping the run, and the query is skipped when the comparison is (`verify --against`). The profile records `freshness_source` (`metadata` or `column`) and `freshness_column`, an alert based on a column names it (`based on updated_at`) and carries it in its `column` field, and `scherlok report` shows it. Connectors gain `get_latest_timestamp(table, column)`, quoted per dialect. ([#87](https://github.com/rbmuller/scherlok/issues/87))
@@ -226,7 +228,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack webhook integration
 - 59 unit tests
 
-[Unreleased]: https://github.com/rbmuller/scherlok/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/rbmuller/scherlok/compare/v1.4.0...HEAD
 [0.7.0]: https://github.com/rbmuller/scherlok/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rbmuller/scherlok/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rbmuller/scherlok/compare/v0.4.0...v0.5.0
