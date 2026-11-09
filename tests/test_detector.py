@@ -191,6 +191,32 @@ class TestFreshnessDetector:
         anomalies = detect_freshness_anomalies("t", current, stored)
         assert len(anomalies) == 0
 
+    def test_a_column_based_age_names_the_column(self):
+        current = {"hours_since_update": 48.0, "freshness_source": "column",
+                   "freshness_column": "updated_at"}
+        stored = {"hours_since_update": 6.0, "freshness_source": "column",
+                  "freshness_column": "updated_at"}
+        anomalies = detect_freshness_anomalies("t", current, stored)
+        assert len(anomalies) == 1
+        assert anomalies[0]["column"] == "updated_at"
+        assert "based on updated_at" in anomalies[0]["message"]
+
+    def test_ages_from_different_sources_are_not_compared(self):
+        """#139: the first run after an upgrade reads a column where the stored
+        age came from metadata; a vacuum time against a load time is no signal."""
+        current = {"hours_since_update": 20.0, "freshness_source": "column",
+                   "freshness_column": "updated_at"}
+        stored = {"hours_since_update": 1.5}
+        assert detect_freshness_anomalies("t", current, stored) == []
+
+    def test_a_stored_age_without_a_source_counts_as_metadata(self):
+        current = {"hours_since_update": 48.0, "freshness_source": "metadata",
+                   "freshness_column": None}
+        stored = {"hours_since_update": 6.0}
+        anomalies = detect_freshness_anomalies("t", current, stored)
+        assert len(anomalies) == 1
+        assert anomalies[0]["column"] is None
+
 
 class TestNullabilityDetector:
     """Tests for nullability anomaly detection."""

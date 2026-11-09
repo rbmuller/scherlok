@@ -29,6 +29,10 @@ class MySQLConnector(BaseConnector):
     # database.table: in MySQL a schema is a database.
     MAX_TABLE_NAME_PARTS = 2
 
+    # information_schema.TABLES.UPDATE_TIME is cached for
+    # information_schema_stats_expiry (a day by default) (#139).
+    METADATA_IS_LAST_WRITE = False
+
     def __init__(self, connection_string: str) -> None:
         super().__init__(connection_string)
         self._conn: Any = None

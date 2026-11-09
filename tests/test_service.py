@@ -22,6 +22,8 @@ NO_DETAILS = dict.fromkeys(DETAIL_FIELDS)
 
 
 class FakeConnector:
+    METADATA_IS_LAST_WRITE = True  # BaseConnector's default
+
     def __init__(self, tables=("users",), row_count=100):
         self.tables = list(tables)
         self.row_count = row_count

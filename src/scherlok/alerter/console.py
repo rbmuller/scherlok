@@ -7,6 +7,7 @@ from rich.table import Table
 
 from scherlok.detector.severity import Severity
 from scherlok.explainer import EXPLANATION_HEADER
+from scherlok.profiler.freshness import FRESHNESS_COLUMN
 
 console = Console()
 
@@ -85,7 +86,9 @@ def print_profile_summary(
         last_mod = freshness.get("last_modified", "unknown")
         hours = freshness.get("hours_since_update")
         hours_str = f"{hours:.1f}h ago" if hours is not None else "unknown"
-        console.print(f"  Freshness: {hours_str} (last: {last_mod})")
+        column = freshness.get(FRESHNESS_COLUMN)
+        label = f"latest {escape(column)}" if column else "last"
+        console.print(f"  Freshness: {hours_str} ({label}: {last_mod})")
 
     if anomaly_count > 0:
         console.print(

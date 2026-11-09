@@ -233,6 +233,8 @@ def test_escalate_raises_warning_findings_to_critical_only():
 class FakeConnector:
     """One table whose rows and per-column stats a test can change between runs."""
 
+    METADATA_IS_LAST_WRITE = True  # BaseConnector's default
+
     def __init__(self, row_count: int = ROWS, stats: dict[str, dict] | None = None):
         self.row_count = row_count
         self.stats = stats or {"id": {"null_count": 0, "distinct_count": ROWS}}

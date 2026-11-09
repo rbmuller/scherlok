@@ -362,6 +362,8 @@ def test_help_lists_against_and_ignore():
 class FakeConnector:
     """One `orders` table whose row count and last update the test sets."""
 
+    METADATA_IS_LAST_WRITE = True  # BaseConnector's default
+
     connection_string = "duckdb:///staging.duckdb"
 
     def __init__(self, row_count: int = 100, hours_since_update: float = 2.0) -> None:

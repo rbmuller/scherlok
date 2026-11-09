@@ -57,6 +57,8 @@ PG_PROJECT = FIXTURES / "jaffle_shop_postgres"
 class FakeConnector:
     """Tables whose row counts a test sets between runs; nothing else changes."""
 
+    METADATA_IS_LAST_WRITE = True  # BaseConnector's default
+
     def __init__(self, **row_counts: int):
         self.row_counts = dict(row_counts)
 

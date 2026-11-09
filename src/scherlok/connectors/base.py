@@ -23,6 +23,7 @@ _KEYED_ROWS = "keyed_rows"
 _KEY_ROWS = "key_rows"
 _UNMATCHED_KEYS = "unmatched_keys"
 _SUM_ALIAS = "sum_{}"
+_LATEST_ALIAS = "latest"
 
 
 class InvalidTableNameError(ValueError):
@@ -103,6 +104,23 @@ class BaseConnector(ABC):
     def get_last_modified(self, table: str) -> datetime | None:
         """Return the last known modification time for a table, or None."""
         ...
+
+    # Whether `get_last_modified` is the time of the last write. A connector
+    # whose metadata is a maintenance time or a cached value says False, and
+    # freshness reads a load-time column first (#139).
+    METADATA_IS_LAST_WRITE = True
+
+    def get_latest_timestamp(self, table: str, column: str) -> Any:
+        """Return ``MAX(column)`` of ``table`` as the driver returns it, in one query.
+
+        Freshness reads it from a load-time column such as ``updated_at`` when
+        the warehouse has no usable last-modified time (#87).
+        """
+        row = self._fetch_one(
+            f"SELECT MAX({self._quote_column(column)}) AS {_LATEST_ALIAS} "
+            f"FROM {self._quote_table(table)}"
+        )
+        return row[_LATEST_ALIAS]
 
     # ------------------------------------------------------------------
     # Reconcile (`scherlok reconcile`): compare an output table with its
