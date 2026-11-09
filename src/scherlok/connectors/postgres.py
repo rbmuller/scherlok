@@ -6,11 +6,11 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 import psycopg2
 import psycopg2.extras
-import psycopg2.sql
 
 from scherlok.connectors.base import BaseConnector, RelationNamespace, quote_ansi_identifier
 
 DEFAULT_SCHEMA = "public"
+SCHEMA_EXISTS_SQL = "SELECT 1 FROM pg_namespace WHERE nspname = %s"
 
 
 class PostgresConnector(BaseConnector):
@@ -33,24 +33,29 @@ class PostgresConnector(BaseConnector):
     def connect(self) -> bool:
         """Validate and establish connection to PostgreSQL.
 
-        A schema in the connection string (``postgresql://host/db/schema``)
-        becomes the session's ``search_path``, so every unqualified table name
-        resolves there.
+        A schema named in the connection string (``postgresql://host/db/schema``)
+        must exist, so a misspelt one fails here instead of showing no tables.
         """
         try:
             self._conn = psycopg2.connect(self._dsn)
             self._conn.autocommit = True
-            if self._schema is not None:
-                with self._cursor() as cur:
-                    cur.execute(
-                        psycopg2.sql.SQL("SET search_path TO {}").format(
-                            psycopg2.sql.Identifier(self._schema)
-                        )
-                    )
+            if self._schema is not None and not self._schema_exists():
+                self._last_error = (
+                    f"schema '{self._schema}' does not exist in this database\n"
+                    "  Hint: list schemas with `\\dn` in psql"
+                )
+                self._conn.close()
+                self._conn = None
+                return False
             return True
         except psycopg2.Error as exc:
             self._last_error = self._classify_error(str(exc))
             return False
+
+    def _schema_exists(self) -> bool:
+        with self._cursor() as cur:
+            cur.execute(SCHEMA_EXISTS_SQL, (self._schema,))
+            return cur.fetchone() is not None
 
     @staticmethod
     def _classify_error(message: str) -> str:
@@ -91,6 +96,16 @@ class PostgresConnector(BaseConnector):
         """Quote a PostgreSQL identifier, doubling any embedded double quote."""
         return quote_ansi_identifier(identifier)
 
+    def _quote_listed_table(self, table: str) -> str:
+        """A listed table in the connection's schema, so the session's
+        ``search_path`` never decides which table a query reads."""
+        return self._quote_name_parts((self.schema, table))
+
+    def _table_name_parts(self, table: str) -> list[str]:
+        """``table`` in the connection's schema, or as qualified as it is given."""
+        parts = super()._table_name_parts(table)
+        return [self.schema, *parts] if len(parts) == 1 else parts
+
     def _fetch_one(self, sql: str) -> dict[str, Any]:
         """Run ``sql`` and return its single row keyed by column alias."""
         with self._cursor() as cur:
@@ -115,7 +130,7 @@ class PostgresConnector(BaseConnector):
 
     def get_row_count(self, table: str) -> int:
         """Return exact row count for a table."""
-        quoted_table = self._quote_identifier(table)
+        quoted_table = self._quote_listed_table(table)
         with self._cursor() as cur:
             cur.execute(f"SELECT count(*) AS cnt FROM {quoted_table}")  # noqa: S608
             return cur.fetchone()["cnt"]
@@ -141,7 +156,7 @@ class PostgresConnector(BaseConnector):
 
     def get_column_stats(self, table: str, column: str) -> dict:
         """Calculate statistics for a numeric or text column."""
-        quoted_table = self._quote_identifier(table)
+        quoted_table = self._quote_listed_table(table)
         quoted_column = self._quote_identifier(column)
         stats: dict[str, Any] = {}
         with self._cursor() as cur:

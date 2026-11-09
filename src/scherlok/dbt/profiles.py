@@ -220,4 +220,6 @@ def _duckdb_connection_string(output: dict, project_dir: Path) -> str:
     database = Path(path)
     if not database.is_absolute():
         database = (project_dir / database).resolve()
-    return f"duckdb:///{database}"
+    # Percent-encoded, since the connector reads the path back from a URL: a
+    # `#` or `?` in a folder name would end it early.
+    return f"duckdb:///{quote(database.as_posix(), safe='/')}"

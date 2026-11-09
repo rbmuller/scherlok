@@ -14,6 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from scherlok.connectors.postgres import DEFAULT_SCHEMA
+
 PLAIN_TABLE = "orders"
 PLAIN_COLUMN = "amount"
 
@@ -24,7 +26,8 @@ PLAIN_COLUMN = "amount"
 HOSTILE_TABLE = r"""orders"\`\'; DROP TABLE users; --"""
 HOSTILE_COLUMN = r"""amount"\`\'; DROP TABLE users; --"""
 
-POSTGRES_TABLE = r'''"orders""\`\'; DROP TABLE users; --"'''
+# A listed table is read in the connection's schema, public by default (#68).
+POSTGRES_TABLE = r'''"public"."orders""\`\'; DROP TABLE users; --"'''
 POSTGRES_COLUMN = r'''"amount""\`\'; DROP TABLE users; --"'''
 
 MYSQL_TABLE = r"""`orders"\``\'; DROP TABLE users; --`"""
@@ -38,7 +41,6 @@ SNOWFLAKE_TABLE = r'''"DB"."SCHEMA"."ORDERS""\`\'; DROP TABLE USERS; --"'''
 SNOWFLAKE_COLUMN = r'''"AMOUNT""\`\'; DROP TABLE USERS; --"'''
 
 MYSQL_DATABASE = "shop"
-POSTGRES_DEFAULT_SCHEMA = "public"
 SNOWFLAKE_SCHEMA = "SCHEMA"
 SNOWFLAKE_TABLES_SQL = (
     'SELECT table_name FROM "{database}".information_schema.tables '
@@ -135,7 +137,7 @@ def _snowflake(results: list[list[dict]], connection_string: str = "snowflake://
 
 @pytest.mark.parametrize(
     ("table", "quoted"),
-    [(PLAIN_TABLE, '"orders"'), (HOSTILE_TABLE, POSTGRES_TABLE)],
+    [(PLAIN_TABLE, '"public"."orders"'), (HOSTILE_TABLE, POSTGRES_TABLE)],
     ids=NAME_IDS,
 )
 def test_postgres_row_count_quotes_the_table(table, quoted):
@@ -185,7 +187,7 @@ def test_postgres_latest_timestamp_keeps_a_dotted_name_whole():
     connector.get_latest_timestamp("events.v2", "updated_at")
 
     assert _executed(cur.execute) == [
-        ('SELECT MAX("updated_at") AS latest FROM "events.v2"',),
+        ('SELECT MAX("updated_at") AS latest FROM "public"."events.v2"',),
     ]
 
 
@@ -197,7 +199,7 @@ def test_postgres_metadata_lookups_bind_the_table_name():
     connector.get_last_modified(HOSTILE_TABLE)
 
     for sql, params in _executed(cur.execute):
-        assert params == (POSTGRES_DEFAULT_SCHEMA, HOSTILE_TABLE)
+        assert params == (DEFAULT_SCHEMA, HOSTILE_TABLE)
         assert HOSTILE_TABLE not in sql
 
 

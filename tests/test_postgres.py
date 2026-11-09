@@ -98,30 +98,65 @@ def test_a_schema_in_the_url_is_split_from_what_libpq_reads():
     assert split_schema("postgresql://u:p@h/shop/My%20Schema")[1] == "My Schema"
 
 
-@patch("scherlok.connectors.postgres.psycopg2.connect")
-def test_connect_sets_the_search_path_to_the_schema(mock_connect):
-    from scherlok.connectors.postgres import PostgresConnector
-
+def _connect_with_schema_lookup(mock_connect, found: bool):
     cur = MagicMock()
     cur.__enter__ = MagicMock(return_value=cur)
     cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = {"?column?": 1} if found else None
     mock_connect.return_value.cursor.return_value = cur
+    return cur
 
+
+@patch("scherlok.connectors.postgres.psycopg2.connect")
+def test_connect_checks_that_the_schema_exists(mock_connect):
+    from scherlok.connectors.postgres import PostgresConnector
+
+    cur = _connect_with_schema_lookup(mock_connect, found=True)
     connector = PostgresConnector(ANALYTICS_URL)
 
     assert connector.connect()
     mock_connect.assert_called_once_with("postgresql://u:p@h:5432/shop?sslmode=require")
-    statement = cur.execute.call_args.args[0]
-    assert "search_path" in repr(statement)
-    assert "analytics" in repr(statement)
+    assert cur.execute.call_args.args[1] == ("analytics",)
 
 
 @patch("scherlok.connectors.postgres.psycopg2.connect")
-def test_connect_without_a_schema_leaves_the_search_path_alone(mock_connect):
+def test_a_misspelt_schema_fails_to_connect(mock_connect):
+    """A schema that doesn't exist used to connect and show no tables (#145 review)."""
+    from scherlok.connectors.postgres import PostgresConnector
+
+    _connect_with_schema_lookup(mock_connect, found=False)
+    connector = PostgresConnector("postgresql://u:p@h/shop/analytcs")
+
+    assert connector.connect() is False
+    assert "schema 'analytcs' does not exist" in connector.last_error
+    mock_connect.return_value.close.assert_called_once()
+
+
+@patch("scherlok.connectors.postgres.psycopg2.connect")
+def test_connect_without_a_schema_runs_no_lookup(mock_connect):
     from scherlok.connectors.postgres import PostgresConnector
 
     assert PostgresConnector("postgresql://u:p@h/shop").connect()
     mock_connect.return_value.cursor.assert_not_called()
+
+
+def test_profiling_queries_name_the_schema():
+    """Tables are qualified rather than left to the session's search_path, which
+    could resolve `orders` to `alice.orders` while columns came from public
+    (#145 review)."""
+    from scherlok.connectors.postgres import PostgresConnector
+
+    connector = PostgresConnector(ANALYTICS_URL)
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = {"cnt": 1}
+    connector._conn = MagicMock()
+    connector._conn.cursor.return_value = cur
+
+    connector.get_row_count("orders")
+
+    assert cur.execute.call_args.args[0].endswith('FROM "analytics"."orders"')
 
 
 def test_metadata_reads_the_schema_of_the_url():
@@ -160,3 +195,12 @@ def test_a_schema_gets_its_own_baseline_scope():
 
     assert connection_scope(ANALYTICS_URL) == "postgresql://h/shop/analytics"
     assert connection_scope("postgresql://u:p@h/shop") == "postgresql://h/shop"
+
+
+def test_an_explicit_public_schema_keeps_the_scope_of_the_database():
+    """`/shop/public` names the tables `/shop` already reads; a new scope would
+    hide their baselines (#145 review). A database called public is not a schema."""
+    from scherlok.service import connection_scope
+
+    assert connection_scope("postgresql://u:p@h/shop/public") == "postgresql://h/shop"
+    assert connection_scope("postgresql://u:p@h/public") == "postgresql://h/public"
