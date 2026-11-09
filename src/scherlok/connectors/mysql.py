@@ -15,6 +15,13 @@ except ImportError as exc:
 
 from scherlok.connectors.base import BaseConnector
 
+# DATA_TYPE values whose mean means something. MySQL's AVG also accepts dates,
+# text and booleans (TINYINT(1)) without an error, so their means were noise (#138).
+NUMERIC_DATA_TYPES = frozenset(
+    {"tinyint", "smallint", "mediumint", "int", "bigint", "decimal", "float", "double"}
+)
+BOOLEAN_COLUMN_TYPE = "tinyint(1)"
+
 
 class MySQLConnector(BaseConnector):
     """Connector for MySQL (and compatible forks such as MariaDB)."""
@@ -77,6 +84,10 @@ class MySQLConnector(BaseConnector):
         """Quote a MySQL identifier in backticks, doubling any embedded backtick."""
         return f"`{identifier.replace('`', '``')}`"
 
+    def _database(self) -> str:
+        """The database named in the connection string."""
+        return urlparse(self.connection_string).path.lstrip("/")
+
     def _fetch_one(self, sql: str) -> dict[str, Any]:
         """Run ``sql`` and return its single row keyed by column alias."""
         with self._cursor() as cur:
@@ -85,7 +96,7 @@ class MySQLConnector(BaseConnector):
 
     def list_tables(self) -> list[str]:
         """List all tables and views in the current database."""
-        db = urlparse(self.connection_string).path.lstrip("/")
+        db = self._database()
         with self._cursor() as cur:
             cur.execute(
                 "SELECT TABLE_NAME FROM information_schema.TABLES "
@@ -104,7 +115,7 @@ class MySQLConnector(BaseConnector):
 
     def get_columns(self, table: str) -> list[dict]:
         """Return column metadata from information_schema."""
-        db = urlparse(self.connection_string).path.lstrip("/")
+        db = self._database()
         with self._cursor() as cur:
             cur.execute(
                 "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE "
@@ -123,7 +134,7 @@ class MySQLConnector(BaseConnector):
             ]
 
     def get_column_stats(self, table: str, column: str) -> dict:
-        """Calculate statistics for a numeric or text column."""
+        """Calculate statistics for a column; mean and stddev only for numeric types."""
         quoted_table = self._quote_identifier(table)
         quoted_column = self._quote_identifier(column)
         stats: dict[str, Any] = {}
@@ -138,6 +149,10 @@ class MySQLConnector(BaseConnector):
             stats["null_count"] = int(row["null_count"] or 0)
             stats["distinct_count"] = int(row["distinct_count"] or 0)
 
+            if not self._is_numeric(cur, table, column):
+                stats["mean"] = None
+                stats["stddev"] = None
+                return stats
 
             try:
                 cur.execute(
@@ -157,9 +172,24 @@ class MySQLConnector(BaseConnector):
 
         return stats
 
+    def _is_numeric(self, cur: Any, table: str, column: str) -> bool:
+        """Whether the column's type has a meaningful mean."""
+        cur.execute(
+            "SELECT DATA_TYPE, COLUMN_TYPE FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (self._database(), table, column),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        return (
+            row["DATA_TYPE"].lower() in NUMERIC_DATA_TYPES
+            and row["COLUMN_TYPE"].lower() != BOOLEAN_COLUMN_TYPE
+        )
+
     def get_last_modified(self, table: str) -> datetime | None:
         """Return last modification time from information_schema.TABLES."""
-        db = urlparse(self.connection_string).path.lstrip("/")
+        db = self._database()
         with self._cursor() as cur:
             cur.execute(
                 "SELECT UPDATE_TIME FROM information_schema.TABLES "

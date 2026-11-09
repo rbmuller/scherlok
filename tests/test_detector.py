@@ -266,6 +266,25 @@ class TestDistributionShiftDetector:
         anomalies = detect_distribution_shift("t", "col", current, stored)
         assert len(anomalies) == 0
 
+    def test_no_anomaly_below_the_minimum_relative_change(self):
+        """#138: a z-score of +50 on a 0.5% move is not a shift worth reporting."""
+        current = {"mean": 100.5, "stddev": 0.01}
+        stored = {"mean": 100.0, "stddev": 0.01}
+        anomalies = detect_distribution_shift("t", "col", current, stored)
+        assert anomalies == []
+
+    def test_a_move_at_the_minimum_relative_change_is_reported(self):
+        current = {"mean": 101.0, "stddev": 0.01}
+        stored = {"mean": 100.0, "stddev": 0.01}
+        anomalies = detect_distribution_shift("t", "col", current, stored)
+        assert len(anomalies) == 1
+
+    def test_minimum_relative_change_does_not_apply_to_a_zero_baseline(self):
+        current = {"mean": 5.0, "stddev": 1.0}
+        stored = {"mean": 0.0, "stddev": 1.0}
+        anomalies = detect_distribution_shift("t", "col", current, stored)
+        assert len(anomalies) == 1
+
     def test_no_anomaly_zero_stddev(self):
         current = {"mean": 105.0, "stddev": 0.0}
         stored = {"mean": 100.0, "stddev": 0.0}

@@ -61,7 +61,7 @@ Current tools (Great Expectations, Soda, dbt tests) require you to **define what
 | **Freshness alert** | Table hasn't updated in 12h (normally every 2h) | CRITICAL |
 | **Schema drift** | Column removed or type changed | CRITICAL |
 | **NULL surge** | NULL rate jumped from 2% to 45% | CRITICAL |
-| **Distribution shift** | Column mean shifted 3+ standard deviations (Shewhart-style control limit) | INFO, WARNING above 5σ |
+| **Distribution shift** | Column mean of a numeric column shifted 3+ standard deviations (Shewhart-style control limit) and at least 1% | INFO, WARNING above 5σ |
 | **Cardinality explosion** | Status column went from 5 values to 500 | CRITICAL |
 | **Broken new table** | First sighting, no baseline yet: the table is empty, a column is NULL in every row, or its `id` / `<table>_id` has duplicates | WARNING (CRITICAL under `verify --table`) |
 | **Constant column** | First sighting: one value in 100+ non-NULL rows | INFO |

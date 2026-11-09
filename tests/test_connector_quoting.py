@@ -57,6 +57,11 @@ NAME_IDS = ["plain", "hostile"]
 
 NULL_AND_DISTINCT_ROW = {"null_count": 0, "distinct_count": 3}
 MEAN_AND_STDDEV_ROW = {"mean": None, "stddev": None}
+NUMERIC_TYPE_ROW = {"DATA_TYPE": "decimal", "COLUMN_TYPE": "decimal(10,2)"}
+MYSQL_COLUMN_TYPE_SQL = (
+    "SELECT DATA_TYPE, COLUMN_TYPE FROM information_schema.COLUMNS "
+    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s"
+)
 
 
 @pytest.fixture()
@@ -189,7 +194,9 @@ def test_mysql_row_count_quotes_the_table(fake_pymysql, table, quoted):
 
 def test_mysql_column_stats_quote_hostile_names(fake_pymysql):
     connector = _mysql()
-    cur = _wire_cursor(connector, [NULL_AND_DISTINCT_ROW, MEAN_AND_STDDEV_ROW])
+    cur = _wire_cursor(
+        connector, [NULL_AND_DISTINCT_ROW, NUMERIC_TYPE_ROW, MEAN_AND_STDDEV_ROW]
+    )
 
     connector.get_column_stats(HOSTILE_TABLE, HOSTILE_COLUMN)
 
@@ -198,6 +205,7 @@ def test_mysql_column_stats_quote_hostile_names(fake_pymysql):
             f"SELECT   SUM(CASE WHEN {MYSQL_COLUMN} IS NULL THEN 1 ELSE 0 END) AS null_count, "
             f"  COUNT(DISTINCT {MYSQL_COLUMN}) AS distinct_count FROM {MYSQL_TABLE}",
         ),
+        (MYSQL_COLUMN_TYPE_SQL, (MYSQL_DATABASE, HOSTILE_TABLE, HOSTILE_COLUMN)),
         (
             f"SELECT   AVG({MYSQL_COLUMN}) AS mean, "
             f"  STDDEV({MYSQL_COLUMN}) AS stddev FROM {MYSQL_TABLE}",

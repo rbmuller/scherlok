@@ -107,6 +107,26 @@ class TestAdaptiveDetectors:
         assert warning[0]["severity"] == Severity.WARNING
         assert warning[0]["severity"] != Severity.CRITICAL
 
+    def test_adaptive_distribution_ignores_a_tiny_move_on_a_tight_history(self):
+        """#138: a cumulative table's mean barely moves between runs, so a 0.03% move
+        scores far above the threshold."""
+        history = _profiles("mean", [10019.6, 10019.7, 10019.8, 10019.9, 10020.0, 10019.8])
+
+        anomalies = detect_distribution_shift(
+            "t", "customer_id", {"mean": 10023.1}, {"mean": 10019.8}, history=history
+        )
+
+        assert anomalies == []
+
+    def test_adaptive_distribution_still_flags_a_unit_bug(self):
+        history = _profiles("mean", [191.6, 191.7, 191.8, 191.9, 192.0, 191.8])
+
+        anomalies = detect_distribution_shift(
+            "t", "amount", {"mean": 19180.0}, {"mean": 191.8}, history=history
+        )
+
+        assert anomalies[0]["severity"] == Severity.WARNING
+
     def test_adaptive_nullability_preserves_effect_size_severity(self):
         history = _profiles("null_rate", [0.01, 0.02, 0.03, 0.02, 0.01, 0.02])
 
