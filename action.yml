@@ -1,7 +1,7 @@
 name: Scherlok Verify
 description: >-
-  Check data changes against the learned baseline with scherlok verify,
-  fail on anomalies and report them in one pull request comment.
+  Fail the pull request when data drifts from the learned Scherlok baseline,
+  with one comment listing every anomaly.
 author: Robson Bayer Müller
 branding:
   icon: search
