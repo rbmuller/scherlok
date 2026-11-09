@@ -13,6 +13,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -411,6 +412,15 @@ def test_freshness_is_not_compared_against_another_database(production_store):
     assert [a["type"] for a in own_clock] == [FRESHNESS_CRITICAL]  # control
     assert against.anomalies == [] and against.passed
     assert skipped == []
+
+
+def test_a_skipped_freshness_check_runs_no_freshness_query(production_store):
+    """`verify --against` throws the freshness comparison away, so it must not pay
+    for a MAX() scan or a metadata lookup per table (#144 review)."""
+    copy = FakeConnector(hours_since_update=20.0)
+    copy.get_last_modified = MagicMock(side_effect=AssertionError("freshness was read"))
+
+    inspect_table(copy, production_store, "orders", skip={CHECK_FRESHNESS})
 
 
 def test_an_empty_table_is_a_warning_when_volume_is_ignored(production_store):

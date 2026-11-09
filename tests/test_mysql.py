@@ -76,6 +76,8 @@ def test_connect_kwargs(mock_pymysql):
     assert kw["password"] == "pw"
     assert kw["database"] == "mydb"
     assert kw["autocommit"] is True
+    # TIMESTAMP columns arrive in UTC, as freshness reads them (#144 review).
+    assert kw["init_command"] == "SET time_zone = '+00:00'"
 
 
 # ---------------------------------------------------------------------------

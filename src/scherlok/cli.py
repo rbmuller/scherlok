@@ -2156,7 +2156,7 @@ def _table_health(
         return "unknown"
     current_vol = profile_volume(connector, table)
     current_sch = profile_schema(connector, table)
-    current_fresh = profile_freshness(connector, table)
+    current_fresh = profile_freshness(connector, table, current_sch.get("columns"))
     stored_fresh = store.get_latest_profile(table, "freshness")
     anomalies = detect_volume_anomalies(table, current_vol, vol)
     anomalies.extend(detect_schema_drift(table, current_sch, sch))

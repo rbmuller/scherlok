@@ -133,6 +133,10 @@ class BigQueryConnector(BaseConnector):
         dataset = self._quote_name_parts((self._project, self._dataset))
         return f"{dataset}{TABLE_NAME_SEPARATOR}{view}"
 
+    def _quote_listed_table(self, table: str) -> str:
+        """A listed table, in the connection's dataset."""
+        return self._quote_dataset_table(table)
+
     def _quote_dataset_table(self, table: str) -> str:
         """``table``, one name as `list_tables` returns it, in the connection's dataset."""
         return self._quote_name_parts((self._project, self._dataset, table))

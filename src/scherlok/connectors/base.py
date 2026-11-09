@@ -133,10 +133,22 @@ class BaseConnector(ABC):
         the warehouse has no usable last-modified time (#87).
         """
         row = self._fetch_one(
-            f"SELECT MAX({self._quote_column(column)}) AS {_LATEST_ALIAS} "
-            f"FROM {self._quote_table(table)}"
+            f"SELECT {self._latest_value(self._quote_column(column))} AS {_LATEST_ALIAS} "
+            f"FROM {self._quote_listed_table(table)}"
         )
         return row[_LATEST_ALIAS]
+
+    def _latest_value(self, quoted_column: str) -> str:
+        """SQL for a column's latest value; a dialect may convert its type here."""
+        return f"MAX({quoted_column})"
+
+    def _quote_listed_table(self, table: str) -> str:
+        """``table`` as `list_tables` returned it: one name, quoted whole.
+
+        Profiling quotes names this way, so a table called ``events.v2`` stays
+        one table; connectors that qualify their names add the defaults.
+        """
+        return self._quote_identifier(table)
 
     # ------------------------------------------------------------------
     # Reconcile (`scherlok reconcile`): compare an output table with its
