@@ -174,13 +174,14 @@ def inspect_table(
     duplicate key, constant column), on the profiles already collected.
 
     ``skip`` leaves checks out. ``CHECK_FRESHNESS`` skips the freshness
-    comparison. ``CHECK_VOLUME`` says the table may hold a sample of the
-    baseline's rows, so only what a sample can't explain is compared: row
-    counts are not, except that a table now empty is a WARNING; cardinality
-    compares the distinct ratio of near-unique columns and gains in distinct
-    values; NULL rates and means are compared with the latest baseline alone,
-    since the spread learned from history is the full table's run-to-run
-    variation, far tighter than a sample's.
+    comparison and its queries, so the reading holds no freshness profile;
+    only `verify`, which saves nothing, skips checks. ``CHECK_VOLUME`` says
+    the table may hold a sample of the baseline's rows, so only what a sample
+    can't explain is compared: row counts are not, except that a table now
+    empty is a WARNING; cardinality compares the distinct ratio of near-unique
+    columns and gains in distinct values; NULL rates and means are compared
+    with the latest baseline alone, since the spread learned from history is
+    the full table's run-to-run variation, far tighter than a sample's.
     """
     anomalies: list[dict] = []
     sampled = CHECK_VOLUME in skip
@@ -202,10 +203,14 @@ def inspect_table(
     if stored_sch:
         anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
 
-    current_fresh = profile_freshness(connector, table, (current_sch or {}).get("columns"))
-    stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
-    if stored_fresh and CHECK_FRESHNESS not in skip:
-        anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))
+    current_fresh: dict = {}
+    if CHECK_FRESHNESS not in skip:
+        current_fresh = profile_freshness(
+            connector, table, (current_sch or {}).get("columns")
+        )
+        stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
+        if stored_fresh:
+            anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))
 
     current_dists: dict[str, dict] = {}
     for col in (current_sch or {}).get("columns", []):

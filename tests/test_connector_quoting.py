@@ -177,6 +177,18 @@ def test_postgres_latest_timestamp_quotes_hostile_names():
     ]
 
 
+def test_postgres_latest_timestamp_keeps_a_dotted_name_whole():
+    """Profiling quotes `events.v2` as one table; freshness must too (#144 review)."""
+    connector = _postgres()
+    cur = _wire_cursor(connector, [{"latest": None}])
+
+    connector.get_latest_timestamp("events.v2", "updated_at")
+
+    assert _executed(cur.execute) == [
+        ('SELECT MAX("updated_at") AS latest FROM "events.v2"',),
+    ]
+
+
 def test_postgres_metadata_lookups_bind_the_table_name():
     connector = _postgres()
     cur = _wire_cursor(connector, [None])
@@ -268,6 +280,16 @@ def test_bigquery_row_count_quotes_every_part(table, quoted):
     connector.get_row_count(table)
 
     assert _executed(connector._query) == [(f"SELECT COUNT(*) AS cnt FROM {quoted}",)]
+
+
+def test_bigquery_latest_timestamp_reads_the_dataset_table():
+    connector = _bigquery([[{"latest": None}]])
+
+    connector.get_latest_timestamp(HOSTILE_TABLE, HOSTILE_COLUMN)
+
+    assert _executed(connector._query) == [
+        (f"SELECT MAX({BIGQUERY_COLUMN}) AS latest FROM {BIGQUERY_TABLE}",),
+    ]
 
 
 def test_bigquery_column_stats_escape_hostile_names():

@@ -21,6 +21,9 @@ NUMERIC_DATA_TYPES = frozenset(
     {"tinyint", "smallint", "mediumint", "int", "bigint", "decimal", "float", "double"}
 )
 BOOLEAN_COLUMN_TYPE = "tinyint(1)"
+# TIMESTAMP values arrive in the session's time zone; in UTC, freshness reads
+# them right. DATETIME values arrive as written either way.
+UTC_SESSION_SQL = "SET time_zone = '+00:00'"
 
 
 class MySQLConnector(BaseConnector):
@@ -49,6 +52,7 @@ class MySQLConnector(BaseConnector):
                 database=parsed.path.lstrip("/"),
                 autocommit=True,
                 cursorclass=pymysql.cursors.DictCursor,
+                init_command=UTC_SESSION_SQL,
             )
             return True
         except pymysql.Error as exc:

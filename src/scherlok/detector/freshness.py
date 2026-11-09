@@ -6,6 +6,7 @@ from scherlok.detector.severity import Severity
 from scherlok.profiler.freshness import (
     FRESHNESS_COLUMN,
     FRESHNESS_SOURCE,
+    HOURS_SINCE_UPDATE,
     SOURCE_COLUMN,
     SOURCE_METADATA,
 )
@@ -31,8 +32,8 @@ def detect_freshness_anomalies(
     """
     anomalies: list[dict] = []
 
-    current_hours = current_profile.get("hours_since_update")
-    stored_hours = stored_profile.get("hours_since_update")
+    current_hours = current_profile.get(HOURS_SINCE_UPDATE)
+    stored_hours = stored_profile.get(HOURS_SINCE_UPDATE)
 
     if current_hours is None or stored_hours is None:
         return anomalies

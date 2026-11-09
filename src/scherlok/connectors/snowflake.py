@@ -165,6 +165,10 @@ class SnowflakeConnector(BaseConnector):
         database = self._quote_identifier(self._database.upper())
         return f"{database}{TABLE_NAME_SEPARATOR}{view}"
 
+    def _quote_listed_table(self, table: str) -> str:
+        """A listed table, in the connection's schema."""
+        return self._quote_schema_table(table)
+
     def _quote_schema_table(self, table: str) -> str:
         """``table``, one name as `list_tables` returns it, in the connection's schema.
 

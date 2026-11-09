@@ -16,6 +16,9 @@ from scherlok.connectors.base import BaseConnector, RelationNamespace, quote_ans
 
 # The only schema `list_tables` reads.
 MAIN_SCHEMA = "main"
+# A TIMESTAMPTZ value needs pytz to reach Python, which Scherlok doesn't
+# install; cast to TIMESTAMP in a UTC session, it arrives as UTC wall time.
+SET_UTC_SESSION_SQL = "SET TimeZone = 'UTC'"
 
 
 class DuckDBConnector(BaseConnector):
@@ -145,6 +148,14 @@ class DuckDBConnector(BaseConnector):
             stats["stddev"] = None
 
         return stats
+
+    def get_latest_timestamp(self, table: str, column: str) -> Any:
+        """``MAX(column)`` as a UTC timestamp without time zone; a DATE becomes its midnight."""
+        self._conn.execute(SET_UTC_SESSION_SQL)
+        return super().get_latest_timestamp(table, column)
+
+    def _latest_value(self, quoted_column: str) -> str:
+        return f"CAST(MAX({quoted_column}) AS TIMESTAMP)"
 
     def get_last_modified(self, table: str) -> datetime | None:
         """Return None because DuckDB does not track per-table modification time."""

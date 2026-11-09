@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import sqlite3
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -57,8 +57,22 @@ def test_duckdb_latest_timestamp_reads_timestamps_and_dates(tmp_path):
     connector = _duckdb_connector(db)
 
     assert connector.get_latest_timestamp("t", "updated_at") == datetime(2026, 11, 2, 8, 30)
-    assert connector.get_latest_timestamp("t", "loaded_on") == date(2026, 11, 2)
+    assert connector.get_latest_timestamp("t", "loaded_on") == datetime(2026, 11, 2)
     assert connector.get_latest_timestamp("t", "empty_at") is None
+
+
+@requires_duckdb
+def test_duckdb_latest_timestamp_reads_timestamptz_as_utc(tmp_path):
+    """MAX of a TIMESTAMPTZ column needs pytz to reach Python, which Scherlok doesn't
+    install, and raised; one table then stopped the whole watch (#144 review)."""
+    db = tmp_path / "w.duckdb"
+    _execute(
+        db,
+        "CREATE TABLE t AS SELECT TIMESTAMPTZ '2026-11-02 08:30:00+00' AS updated_at",
+    )
+    connector = _duckdb_connector(db)
+
+    assert connector.get_latest_timestamp("t", "updated_at") == datetime(2026, 11, 2, 8, 30)
 
 
 def _anomaly_types(home: Path) -> list[str]:

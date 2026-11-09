@@ -161,8 +161,16 @@ class TestFreshnessColumn:
     def test_prefers_the_update_time_over_the_creation_time(self):
         assert freshness_column([CREATED_AT, UPDATED_AT]) == "updated_at"
 
-    def test_falls_back_to_any_timestamp_ending_in_at(self):
-        assert freshness_column([STATUS, SHIPPED_AT]) == "shipped_at"
+    def test_reads_no_timestamp_outside_the_load_time_names(self):
+        """`expires_at` is always in the future, `deleted_at` rarely moves and
+        `last_login_at` is someone's login: none dates a load (#144 review)."""
+        others = [SHIPPED_AT, {"name": "expires_at", "type": "timestamp"},
+                  {"name": "last_login_at", "type": "timestamp"}]
+        assert freshness_column([STATUS, *others]) is None
+
+    def test_reads_the_etl_tools_load_columns(self):
+        synced = {"name": "_fivetran_synced", "type": "TIMESTAMP_TZ"}
+        assert freshness_column([CREATED_AT, synced]) == "_fivetran_synced"
 
     def test_never_reads_a_business_date(self):
         """The stored age gives the column's latest value away, so a birth date is
@@ -221,6 +229,23 @@ class TestFreshnessSources:
     def test_untrusted_metadata_is_still_used_without_a_column(self):
         connector = _FreshnessConnector(
             metadata=_hours_ago(5), columns=[STATUS], metadata_is_last_write=False
+        )
+
+        result = profile_freshness(connector, "orders")
+
+        assert result[FRESHNESS_SOURCE] == SOURCE_METADATA
+        assert result["hours_since_update"] == pytest.approx(5, abs=0.05)
+
+    def test_a_column_the_warehouse_cannot_aggregate_falls_back_to_metadata(self):
+        """A BigQuery table that needs a partition filter, a missing driver module:
+        one table's freshness query must not stop the run (#144 review)."""
+
+        class Failing(_FreshnessConnector):
+            def get_latest_timestamp(self, table, column):
+                raise RuntimeError("Cannot query over table without a filter")
+
+        connector = Failing(
+            metadata=_hours_ago(5), columns=[UPDATED_AT], metadata_is_last_write=False
         )
 
         result = profile_freshness(connector, "orders")
