@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "scherlok",
   "display_name": "Scherlok — data quality monitoring",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Profile your database, learn what normal looks like, and let Claude tell you when something changed.",
   "long_description": "Scherlok gives Claude read-only tools to monitor data quality in your warehouse.\n\nAsk it to profile your tables once, and it stores a baseline: row counts, column types, NULL rates, value distributions, freshness cadence and cardinality. From then on it can compare the current state against that baseline and report what drifted — volume drops and spikes, schema changes, stale tables, NULL surges, distribution shifts, cardinality explosions — each scored INFO, WARNING or CRITICAL. A table it has never seen is checked right away for being empty, columns that are NULL in every row and duplicate keys. There are no rules or thresholds to write. To gate a change, verify compares against the baseline without saving profiles or anomalies, so a retry after a failure keeps failing until the data is fixed. To check a build against its input, reconcile compares an output table with its source table: row counts, keys repeated by a join that fans out, keys lost or added, and column totals, reporting counts and totals only.\n\nThe connection string is resolved by the server from your settings and is never passed by the model. Every operation is read-only (SELECT and information_schema), there is no arbitrary-SQL tool, and results are capped so a single call cannot exhaust the conversation.\n\nWorks with PostgreSQL, MySQL and DuckDB. The command-line version adds BigQuery and Snowflake.",
   "author": {

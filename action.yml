@@ -50,7 +50,7 @@ inputs:
   scherlok-version:
     description: Scherlok version installed from PyPI. Defaults to the release this action ships with.
     required: false
-    default: "1.3.0"
+    default: "1.3.1"
   install-from:
     description: >-
       For testing this action: install Scherlok from this local path, such as a
