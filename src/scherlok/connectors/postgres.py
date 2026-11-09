@@ -2,11 +2,15 @@
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.sql
 
-from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
+from scherlok.connectors.base import BaseConnector, RelationNamespace, quote_ansi_identifier
+
+DEFAULT_SCHEMA = "public"
 
 
 class PostgresConnector(BaseConnector):
@@ -19,12 +23,30 @@ class PostgresConnector(BaseConnector):
     def __init__(self, connection_string: str) -> None:
         super().__init__(connection_string)
         self._conn: Any = None
+        self._dsn, self._schema = split_schema(connection_string)
+
+    @property
+    def schema(self) -> str:
+        """The schema whose tables are listed and profiled."""
+        return self._schema or DEFAULT_SCHEMA
 
     def connect(self) -> bool:
-        """Validate and establish connection to PostgreSQL."""
+        """Validate and establish connection to PostgreSQL.
+
+        A schema in the connection string (``postgresql://host/db/schema``)
+        becomes the session's ``search_path``, so every unqualified table name
+        resolves there.
+        """
         try:
-            self._conn = psycopg2.connect(self.connection_string)
+            self._conn = psycopg2.connect(self._dsn)
             self._conn.autocommit = True
+            if self._schema is not None:
+                with self._cursor() as cur:
+                    cur.execute(
+                        psycopg2.sql.SQL("SET search_path TO {}").format(
+                            psycopg2.sql.Identifier(self._schema)
+                        )
+                    )
             return True
         except psycopg2.Error as exc:
             self._last_error = self._classify_error(str(exc))
@@ -75,14 +97,19 @@ class PostgresConnector(BaseConnector):
             cur.execute(sql)
             return dict(cur.fetchone())
 
+    def namespace(self) -> RelationNamespace:
+        """The database of the connection string and the schema it names, or public."""
+        return RelationNamespace(database=database_name(self._dsn), schema=self.schema)
+
     def list_tables(self) -> list[str]:
-        """List all user tables and views in the public schema."""
+        """List all user tables and views in the connection's schema (public by default)."""
         with self._cursor() as cur:
             cur.execute(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' "
+                "WHERE table_schema = %s "
                 "AND table_type IN ('BASE TABLE', 'VIEW') "
-                "ORDER BY table_name"
+                "ORDER BY table_name",
+                (self.schema,),
             )
             return [row["table_name"] for row in cur.fetchall()]
 
@@ -99,9 +126,9 @@ class PostgresConnector(BaseConnector):
             cur.execute(
                 "SELECT column_name, data_type, is_nullable "
                 "FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = %s "
+                "WHERE table_schema = %s AND table_name = %s "
                 "ORDER BY ordinal_position",
-                (table,),
+                (self.schema, table),
             )
             return [
                 {
@@ -152,10 +179,33 @@ class PostgresConnector(BaseConnector):
             cur.execute(
                 "SELECT GREATEST(last_autovacuum, last_autoanalyze, "
                 "last_vacuum, last_analyze) AS last_mod "
-                "FROM pg_stat_user_tables WHERE relname = %s",
-                (table,),
+                "FROM pg_stat_user_tables WHERE schemaname = %s AND relname = %s",
+                (self.schema, table),
             )
             row = cur.fetchone()
             if row and row["last_mod"]:
                 return row["last_mod"]
             return None
+
+
+def split_schema(connection_string: str) -> tuple[str, str | None]:
+    """Split ``postgresql://host/db/schema`` into the DSN libpq reads and the schema.
+
+    Anything else, including a key/value DSN, is returned unchanged with no
+    schema.
+    """
+    if "://" not in connection_string:
+        return connection_string, None
+    parts = urlsplit(connection_string)
+    segments = parts.path.strip("/").split("/")
+    if len(segments) != 2 or not all(segments) or "@" in parts.path:
+        return connection_string, None
+    database, schema = segments
+    return urlunsplit(parts._replace(path=f"/{database}")), unquote(schema)
+
+
+def database_name(dsn: str) -> str | None:
+    """The database of a URL-form DSN, or None."""
+    if "://" not in dsn:
+        return None
+    return unquote(urlsplit(dsn).path.strip("/")) or None

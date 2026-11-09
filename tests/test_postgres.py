@@ -79,3 +79,84 @@ def test_get_column_stats_queries_no_column_values():
         assert "MIN(" not in sql
         assert "MAX(" not in sql
         assert "GROUP BY" not in sql
+
+
+# ----- a schema in the connection string (#68) --------------------------------
+
+ANALYTICS_URL = "postgresql://u:p@h:5432/shop/analytics?sslmode=require"
+
+
+def test_a_schema_in_the_url_is_split_from_what_libpq_reads():
+    from scherlok.connectors.postgres import split_schema
+
+    assert split_schema(ANALYTICS_URL) == (
+        "postgresql://u:p@h:5432/shop?sslmode=require",
+        "analytics",
+    )
+    assert split_schema("postgresql://u:p@h/shop") == ("postgresql://u:p@h/shop", None)
+    assert split_schema("dbname=shop host=h") == ("dbname=shop host=h", None)
+    assert split_schema("postgresql://u:p@h/shop/My%20Schema")[1] == "My Schema"
+
+
+@patch("scherlok.connectors.postgres.psycopg2.connect")
+def test_connect_sets_the_search_path_to_the_schema(mock_connect):
+    from scherlok.connectors.postgres import PostgresConnector
+
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    mock_connect.return_value.cursor.return_value = cur
+
+    connector = PostgresConnector(ANALYTICS_URL)
+
+    assert connector.connect()
+    mock_connect.assert_called_once_with("postgresql://u:p@h:5432/shop?sslmode=require")
+    statement = cur.execute.call_args.args[0]
+    assert "search_path" in repr(statement)
+    assert "analytics" in repr(statement)
+
+
+@patch("scherlok.connectors.postgres.psycopg2.connect")
+def test_connect_without_a_schema_leaves_the_search_path_alone(mock_connect):
+    from scherlok.connectors.postgres import PostgresConnector
+
+    assert PostgresConnector("postgresql://u:p@h/shop").connect()
+    mock_connect.return_value.cursor.assert_not_called()
+
+
+def test_metadata_reads_the_schema_of_the_url():
+    from scherlok.connectors.base import RelationNamespace
+    from scherlok.connectors.postgres import PostgresConnector
+
+    connector = PostgresConnector(ANALYTICS_URL)
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchall.return_value = []
+    cur.fetchone.return_value = None
+    connector._conn = MagicMock()
+    connector._conn.cursor.return_value = cur
+
+    connector.list_tables()
+    connector.get_columns("orders")
+    connector.get_last_modified("orders")
+
+    params = [call.args[1] for call in cur.execute.call_args_list]
+    assert params == [("analytics",), ("analytics", "orders"), ("analytics", "orders")]
+    assert connector.namespace() == RelationNamespace(database="shop", schema="analytics")
+
+
+def test_without_a_schema_the_namespace_is_public():
+    from scherlok.connectors.base import RelationNamespace
+    from scherlok.connectors.postgres import PostgresConnector
+
+    assert PostgresConnector("postgresql://u:p@h/shop").namespace() == RelationNamespace(
+        database="shop", schema="public"
+    )
+
+
+def test_a_schema_gets_its_own_baseline_scope():
+    from scherlok.service import connection_scope
+
+    assert connection_scope(ANALYTICS_URL) == "postgresql://h/shop/analytics"
+    assert connection_scope("postgresql://u:p@h/shop") == "postgresql://h/shop"

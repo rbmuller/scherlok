@@ -12,7 +12,10 @@ except ImportError as exc:
         "Install it with: pip install scherlok[duckdb]"
     ) from exc
 
-from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
+from scherlok.connectors.base import BaseConnector, RelationNamespace, quote_ansi_identifier
+
+# The only schema `list_tables` reads.
+MAIN_SCHEMA = "main"
 
 
 class DuckDBConnector(BaseConnector):
@@ -74,12 +77,18 @@ class DuckDBConnector(BaseConnector):
         names = [description[0] for description in cursor.description]
         return dict(zip(names, cursor.fetchone(), strict=True))
 
+    def namespace(self) -> RelationNamespace:
+        """The main schema. The database is left unknown: dbt-duckdb names it
+        after the file or an attach alias, which the path alone can't tell."""
+        return RelationNamespace(schema=MAIN_SCHEMA)
+
     def list_tables(self) -> list[str]:
         """List all tables and views in the main schema."""
         rows = self._conn.execute(
             "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main' AND table_type IN ('BASE TABLE', 'VIEW') "
-            "ORDER BY table_name"
+            "WHERE table_schema = ? AND table_type IN ('BASE TABLE', 'VIEW') "
+            "ORDER BY table_name",
+            [MAIN_SCHEMA],
         ).fetchall()
         return [row[0] for row in rows]
 

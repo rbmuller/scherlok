@@ -40,7 +40,9 @@ from scherlok.approvals import (
 )
 from scherlok.config import BASELINE_LOCKED_SETTING, ENV_BASELINE_LOCKED, ScherlokConfig
 from scherlok.connectors import get_connector
+from scherlok.connectors.base import UNKNOWN_NAMESPACE, RelationNamespace
 from scherlok.dbt.manifest import DEFAULT_TARGET_PATH
+from scherlok.dbt.relations import ambiguous_identifiers, resolve_relation
 from scherlok.demo import DUCKDB_MISSING_HINT, duckdb_available, run_demo
 from scherlok.detector.anomaly import detect_volume_anomalies
 from scherlok.detector.fields import anomaly_details
@@ -785,9 +787,10 @@ class DbtScope:
     tables: list[str] = field(default_factory=list)
     not_found: list[str] = field(default_factory=list)
 
-    def resolve(self, visible: set[str]) -> None:
+    def resolve(self, visible: set[str], namespace: RelationNamespace) -> None:
+        ambiguous = ambiguous_identifiers(self.models)
         for node in self.models:
-            physical = _resolve_physical_table(node, visible)
+            physical = resolve_relation(node, visible, namespace, ambiguous)
             if physical is None:
                 self.not_found.append(node.name)
             else:
@@ -847,7 +850,7 @@ def _run_verify(
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
     if dbt_scope is not None:
-        dbt_scope.resolve(set(connector.list_tables()))
+        dbt_scope.resolve(set(connector.list_tables()), _connector_namespace(connector))
         tables = [*(tables or []), *dbt_scope.tables]
     nothing_to_verify = tables is not None and not tables
 
@@ -1527,10 +1530,12 @@ def _dbt_impl(
 
     # 3. Match models to physical tables visible to the connector
     visible = set(connector.list_tables())
+    namespace = _connector_namespace(connector)
+    ambiguous = ambiguous_identifiers(nodes)
     matched: list[tuple[DbtNode, str]] = []
     missing: list[DbtNode] = []
     for node in nodes:
-        physical = _resolve_physical_table(node, visible)
+        physical = resolve_relation(node, visible, namespace, ambiguous)
         if physical is None:
             missing.append(node)
         else:
@@ -1845,18 +1850,10 @@ def dbt_run_and_watch(
             set_verbosity(quiet=prev_quiet)
 
 
-def _resolve_physical_table(node: object, visible: set[str]) -> str | None:
-    """Match a dbt node to a physical table name visible to the connector.
-
-    Tries identifier first, then name; for Snowflake also tries uppercase variants.
-    """
-    candidates = [node.identifier, node.name]  # type: ignore[attr-defined]
-    if node.adapter == "snowflake":  # type: ignore[attr-defined]
-        candidates.extend([c.upper() for c in candidates if c])
-    for cand in candidates:
-        if cand and cand in visible:
-            return cand
-    return None
+def _connector_namespace(connector: object) -> RelationNamespace:
+    """Where the connector lists tables; unknown for one that can't say (#68)."""
+    namespace = connector.namespace()  # type: ignore[attr-defined]
+    return namespace if isinstance(namespace, RelationNamespace) else UNKNOWN_NAMESPACE
 
 
 def _dbt_model_payload(

@@ -8,7 +8,6 @@ from pathlib import Path
 
 MIN_MANIFEST_VERSION = 10  # dbt 1.6+
 MATERIALIZED_PHYSICAL = {"table", "incremental", "view", "materialized_view"}
-SUPPORTED_ADAPTERS = {"postgres", "bigquery", "snowflake"}
 # dbt writes its artifacts here, relative to the project root, unless told
 # otherwise by `--target-path`, DBT_TARGET_PATH or `target-path`.
 DEFAULT_TARGET_PATH = "target"
@@ -26,7 +25,7 @@ class DbtNode:
     schema: str
     identifier: str  # alias for models, identifier for sources
     relation_name: str | None  # quoted FQN as dbt produced it (may be None)
-    adapter: str  # postgres / bigquery / snowflake
+    adapter: str  # the manifest's adapter_type
 
 
 @dataclass(frozen=True)
@@ -50,21 +49,20 @@ def load_manifest(
     project_dir: str | Path,
     *,
     target_path: str | Path = DEFAULT_TARGET_PATH,
-    check_adapter: bool = True,
 ) -> dict:
     """Load and validate target/manifest.json from a dbt project directory.
+
+    Any adapter loads: the connection comes from profiles.yml, which says when
+    it can't resolve one, or from ``--connection-string`` (#68).
 
     Args:
         project_dir: Path to the dbt project root (must contain target/manifest.json).
         target_path: dbt's target directory, relative to ``project_dir`` unless
             absolute, as dbt resolves it.
-        check_adapter: Reject adapters whose profiles.yml Scherlok can't
-            resolve. Callers that take the connection from elsewhere, such
-            as ``scherlok verify``, pass False.
 
     Raises:
         FileNotFoundError: When manifest.json is missing.
-        ValueError: When manifest_version is too old or adapter is unsupported.
+        ValueError: When manifest_version is too old.
     """
     project_path = Path(project_dir)
     manifest_path = project_path / target_path / "manifest.json"
@@ -83,14 +81,6 @@ def load_manifest(
             f"Unsupported manifest_version v{version}. "
             f"Scherlok requires dbt 1.6+ (manifest v{MIN_MANIFEST_VERSION}+). "
             f"Upgrade dbt and re-run `dbt compile`."
-        )
-
-    adapter = manifest.get("metadata", {}).get("adapter_type")
-    if check_adapter and adapter and adapter not in SUPPORTED_ADAPTERS:
-        raise ValueError(
-            f"Unsupported dbt adapter '{adapter}'. "
-            f"Supported: {sorted(SUPPORTED_ADAPTERS)}. "
-            f"Use --connection-string to bypass profiles.yml resolution."
         )
 
     return manifest

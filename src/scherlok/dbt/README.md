@@ -33,18 +33,15 @@ First run = baseline. Subsequent runs detect drift.
 
 ## Supported adapters
 
-| Adapter | Status |
-|---------|--------|
-| `postgres` | ✅ |
-| `bigquery` | ✅ |
-| `snowflake` | ✅ |
-| Others (Redshift, Databricks, DuckDB, …) | ❌ — use `--connection-string` |
-
-For unsupported adapters, point Scherlok at the warehouse directly:
+`profiles.yml` is resolved for `postgres`, `bigquery`, `snowflake`, `mysql` and `duckdb`. Any other adapter (Redshift, Databricks, …) works when you point Scherlok at the warehouse directly:
 
 ```bash
-scherlok dbt --project-dir . --connection-string "postgresql://user:pw@host/db"
+scherlok dbt --project-dir . --connection-string "postgresql://user:pw@host/db/analytics"
 ```
+
+## Matching models to tables
+
+A connection lists the tables of one database and schema: the PostgreSQL schema in the connection string (`postgresql://host/db/analytics`, `public` when left out), the MySQL database, DuckDB's `main` schema, the BigQuery dataset or the Snowflake schema. A model matches a listed table when its alias (or name) does and dbt built it in that schema and database, compared without case. A model built in another schema, such as a custom `+schema` folder, is reported as not found instead of being matched to a table of the same name somewhere else.
 
 ## Connection resolution
 
@@ -54,7 +51,7 @@ When `--connection-string` is **not** set, Scherlok resolves the connection from
 2. Looks the profile up in `profiles.yml` (search order: `--profiles-dir` → `$DBT_PROFILES_DIR` → `~/.dbt`).
 3. Selects the target via `--target` or the profile's default `target:` key.
 4. Renders `{{ env_var('NAME') }}` and `{{ env_var('NAME', 'default') }}` from the environment.
-5. Builds a Scherlok connection string for the matched adapter.
+5. Builds a Scherlok connection string for the matched adapter. For PostgreSQL it includes the target's `schema` unless that is `public`; for DuckDB, the `path`, relative to the project.
 
 > Only `env_var` is rendered. Anything else (full Jinja, secrets resolvers, etc.) raises and asks you to pass `--connection-string`.
 

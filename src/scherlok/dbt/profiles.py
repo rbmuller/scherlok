@@ -1,6 +1,6 @@
 """Resolve a Scherlok connection string from a dbt project's profiles.yml.
 
-Supports the four adapters Scherlok already speaks: postgres, bigquery, snowflake, mysql.
+Supports the adapters Scherlok speaks: postgres, bigquery, snowflake, mysql, duckdb.
 Renders only `{{ env_var('FOO') }}` / `{{ env_var('FOO', 'default') }}` — anything
 else (full Jinja, secrets:// resolvers, etc.) raises and asks the user to pass
 --connection-string explicitly.
@@ -12,10 +12,16 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
+
+from scherlok.connectors.postgres import DEFAULT_SCHEMA as POSTGRES_DEFAULT_SCHEMA
 
 ENV_VAR_PATTERN = re.compile(
     r"""\{\{\s*env_var\(\s*['"]([^'"]+)['"](?:\s*,\s*['"]([^'"]*)['"])?\s*\)\s*\}\}"""
 )
+
+
+DUCKDB_MEMORY = ":memory:"
 
 
 class ProfileResolutionError(ValueError):
@@ -95,7 +101,7 @@ def resolve_connection_string(
         )
 
     rendered = _render_env_vars(output)
-    return _output_to_connection_string(rendered)
+    return _output_to_connection_string(rendered, project_path)
 
 
 def _resolve_profiles_path(profiles_dir: str | Path | None) -> Path:
@@ -125,7 +131,7 @@ def _replace_env_var(match: re.Match) -> str:
     return os.environ.get(name, default)
 
 
-def _output_to_connection_string(output: dict) -> str:
+def _output_to_connection_string(output: dict, project_dir: Path) -> str:
     """Map a rendered dbt output block to a Scherlok connection string."""
     adapter_type = output.get("type", "")
 
@@ -137,10 +143,12 @@ def _output_to_connection_string(output: dict) -> str:
         return _snowflake_connection_string(output)
     if adapter_type == "mysql":
         return _mysql_connection_string(output)
+    if adapter_type == "duckdb":
+        return _duckdb_connection_string(output, project_dir)
 
     raise ProfileResolutionError(
         f"Unsupported dbt adapter '{adapter_type}'. "
-        f"Supported: postgres, bigquery, snowflake, mysql. "
+        f"Supported: postgres, bigquery, snowflake, mysql, duckdb. "
         f"Use --connection-string to bypass profiles.yml."
     )
 
@@ -156,7 +164,14 @@ def _postgres_connection_string(output: dict) -> str:
             "Postgres profile missing required fields: user, dbname."
         )
     auth = f"{user}:{password}@" if password else f"{user}@"
-    return f"postgresql://{auth}{host}:{port}/{dbname}"
+    url = f"postgresql://{auth}{host}:{port}/{dbname}"
+    # The target's schema, so the models dbt builds there are the tables Scherlok
+    # lists (#68). Left out for public, the default, so a connection saved before
+    # schemas were read keeps its scope and its baselines.
+    schema = output.get("schema") or ""
+    if schema and schema != POSTGRES_DEFAULT_SCHEMA:
+        url = f"{url}/{quote(schema, safe='')}"
+    return url
 
 
 def _bigquery_connection_string(output: dict) -> str:
@@ -192,3 +207,17 @@ def _mysql_connection_string(output: dict) -> str:
         )
     auth = f"{user}:{password}@" if password else f"{user}@"
     return f"mysql://{auth}{host}:{port}/{database}"
+
+
+def _duckdb_connection_string(output: dict, project_dir: Path) -> str:
+    """dbt-duckdb's ``path``, relative to the project like dbt run from there."""
+    path = output.get("path") or ""
+    if not path or path == DUCKDB_MEMORY:
+        raise ProfileResolutionError(
+            "DuckDB profile needs a database file in `path`; an in-memory database "
+            "is gone once dbt exits."
+        )
+    database = Path(path)
+    if not database.is_absolute():
+        database = (project_dir / database).resolve()
+    return f"duckdb:///{database}"
