@@ -186,6 +186,29 @@ def test_scherlok_dbt_reads_a_duckdb_project(warehouse, project):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert [model["physical"] for model in payload["models"]] == ["fct_orders"]
+def test_a_dbt_build_is_verified_against_production(tmp_path, project):
+    """The CI examples build into another database and verify what dbt built there
+    against production's baseline (#88, #89): --dbt-project with --against."""
+    production, build = tmp_path / "production.duckdb", tmp_path / "build.duckdb"
+    _sql(production, _orders("fct_orders"))
+    _sql(build, _orders("fct_orders", rows=ROWS // 4))
+    investigated = runner.invoke(
+        app, ["investigate"], env={"SCHERLOK_CONNECTION": f"duckdb:///{production}"}
+    )
+    assert investigated.exit_code == 0
+    _write_artifacts(project, {"fct_orders": _model("fct_orders")}, {"fct_orders": "success"})
+
+    result = runner.invoke(
+        app,
+        ["verify", "--output", "json", "--dbt-project", str(project),
+         "--against", f"duckdb:///{production}"],
+        env={"SCHERLOK_CONNECTION": f"duckdb:///{build}"},
+    )
+
+    payload = json.loads(result.stdout)
+    assert result.exit_code == 1
+    assert payload["tables_verified"] == ["fct_orders"]
+    assert [a["type"] for a in payload["anomalies"]] == ["volume_drop"]
 
 
 def test_ephemeral_models_are_skipped(warehouse, project):
