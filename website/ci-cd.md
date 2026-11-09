@@ -307,9 +307,123 @@ Or in one step, profiling only the models dbt actually built:
 
 Both accept `--output json` for parsers. See [dbt](dbt.md) for the details.
 
+## GitLab CI
+
+Two jobs share the store: a merge request job gates the change with `verify`, which never writes the baseline, and a scheduled job on the default branch keeps the baseline learning with `watch`.
+
+```yaml
+# .gitlab-ci.yml
+variables:
+  SCHERLOK_STORE: s3://my-bucket/scherlok/profiles.db
+
+.scherlok:
+  image: python:3.12-slim
+  before_script:
+    # awscli syncs an s3:// store; install gsutil or az for gs:// or az://.
+    - pip install --quiet scherlok awscli
+
+data-check:
+  extends: .scherlok
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - scherlok verify --fail-on critical --record scherlok-run.jsonl
+  artifacts:
+    when: always
+    paths:
+      - scherlok-run.jsonl
+
+baseline:
+  extends: .scherlok
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - scherlok watch
+```
+
+- **Credentials:** define `SCHERLOK_CONNECTION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_DEFAULT_REGION` under *Settings → CI/CD → Variables*, masked so they never print. Scherlok reads the connection from `SCHERLOK_CONNECTION`, never from the command line. A *protected* variable only reaches pipelines on protected branches and tags, so the merge request job needs the connection unprotected.
+- **Schedule:** create the `baseline` schedule under *Build → Pipeline schedules*, for example daily. Its first run, with no file in the store yet, records the first baseline; until then `verify` lists every table under `tables_without_baseline`.
+- `verify` exits 1 when an anomaly reaches `--fail-on`, which fails the job; `--record` keeps the run record as an artifact.
+
+With dbt, build the change into a CI schema first and verify only what that run built, against production's baseline:
+
+```yaml
+data-check:
+  extends: .scherlok
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - pip install --quiet dbt-postgres
+    - dbt run --target ci
+    - scherlok verify --dbt-project . --against "$PRODUCTION_SCOPE" --fail-on critical
+```
+
+Here `SCHERLOK_CONNECTION` points at where dbt built, such as `postgresql://ci:…@db.example.com/shop/dbt_ci` for a PostgreSQL CI schema, and `PRODUCTION_SCOPE` names the production database whose baseline the `baseline` job keeps, such as `postgresql://db.example.com/shop`: a scope, not a connection string, so it holds no credentials. Add `--ignore volume` when the CI build runs on a sample. See [Compare a build with production](#compare-a-build-with-production-verify-against).
+
+## CircleCI
+
+The same two jobs: the gate on every pushed branch except the default one, and the learning job on a scheduled pipeline.
+
+```yaml
+# .circleci/config.yml
+version: 2.1
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.12
+
+commands:
+  install-scherlok:
+    steps:
+      # awscli syncs an s3:// store; install gsutil or az for gs:// or az://.
+      - run: pip install --quiet scherlok awscli
+
+jobs:
+  data-check:
+    executor: python
+    environment:
+      SCHERLOK_STORE: s3://my-bucket/scherlok/profiles.db
+    steps:
+      - checkout
+      - install-scherlok
+      - run: scherlok verify --fail-on critical --record scherlok-run.jsonl
+      - store_artifacts:
+          path: scherlok-run.jsonl
+  baseline:
+    executor: python
+    environment:
+      SCHERLOK_STORE: s3://my-bucket/scherlok/profiles.db
+    steps:
+      - install-scherlok
+      - run: scherlok watch
+
+workflows:
+  gate:
+    when:
+      not:
+        equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+    jobs:
+      - data-check:
+          context: scherlok
+          filters:
+            branches:
+              ignore: main
+  learn:
+    when:
+      equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+    jobs:
+      - baseline:
+          context: scherlok
+```
+
+- **Credentials:** put `SCHERLOK_CONNECTION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_DEFAULT_REGION` in a context (here `scherlok`) or in the project's environment variables. CircleCI masks them in step output, and Scherlok reads the connection from `SCHERLOK_CONNECTION`, never from the command line. Pull requests from forks don't receive them unless *Pass secrets to builds from forked pull requests* is on; leave it off, since a fork's code would run with your database credentials.
+- **Schedule:** add a scheduled pipeline on the default branch under *Project Settings → Triggers*, for example daily. Its first run records the first baseline.
+- With dbt, replace the `verify` step with `dbt run --target ci` and `scherlok verify --dbt-project . --against "$PRODUCTION_SCOPE"`, as in the [GitLab CI](#gitlab-ci) example.
+
 ## Any other CI
 
-Outside GitHub Actions: install the package, restore the shared store, run `scherlok ci` (or `scherlok verify` for a read-only gate). The exit code does the rest. Worked examples for GitLab CI and CircleCI are welcome as contributions; see the [issue tracker](https://github.com/rbmuller/scherlok/issues).
+Install the package, point `SCHERLOK_STORE` at the shared store, gate changes with `scherlok verify` and keep the baseline learning with a scheduled `scherlok watch`, as in the [GitLab CI](#gitlab-ci) and [CircleCI](#circleci) examples. The exit code does the rest.
 
 ## Container image
 
