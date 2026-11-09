@@ -127,7 +127,7 @@ Records saved before scopes existed have none and keep counting for every connec
 |---|---|
 | Volume | row count, time of the run |
 | Schema | column names, types, nullability |
-| Freshness | the table's last-modified time as the warehouse reports it, hours since then |
+| Freshness | the table's last change and the hours since then, from the warehouse's last-modified time or from the latest value of a load-time column such as `updated_at`; where it came from (see [Freshness](connectors.md#freshness)) |
 | Distribution, per column | mean, standard deviation, NULL count, NULL rate, distinct count |
 | Anomaly history | table, anomaly type, severity, message, detection time, id of the run that found it; the column involved, the metric with its baseline and current values (aggregates or column types), the change in percent and a fixed hint |
 | Runs | command, Scherlok version, names of the tables checked, `--fail-on`, passed or failed, anomaly count per severity, start and end time; for `verify`, the scope given to `--against` and the checks `--ignore` left out |
@@ -136,7 +136,7 @@ Records saved before scopes existed have none and keep counting for every connec
 
 Anomaly messages quote the same aggregates and column names. Under `scherlok dbt` and `scherlok dbt-run-and-watch` they also name the downstream dbt models and exposures, with the exposure owners declared in your dbt project.
 
-An aggregate can still give a value away on a tiny table: the mean of a one-row column is that row's value.
+An aggregate can still give a value away on a tiny table: the mean of a one-row column is that row's value. The freshness of a table dated by a load-time column is that column's latest value, so only load and update timestamps are read for it.
 
 Older releases also saved each column's five most frequent values and its minimum and maximum (`top_values`, `min`, `max`). The first time an upgraded Scherlok opens a store, it deletes those fields and rewrites the file with SQLite's `VACUUM`, so they do not linger in free space; a remote store is cleaned on its next sync. Copies made before that still hold the values, including backups and older object versions in a versioned bucket: delete them yourself. A runner still on an older release that writes to the same store saves new values again, so upgrade every runner that shares it.
 

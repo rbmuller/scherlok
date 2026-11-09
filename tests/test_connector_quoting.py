@@ -164,6 +164,18 @@ def test_postgres_column_stats_quote_hostile_names():
     ]
 
 
+def test_postgres_latest_timestamp_quotes_hostile_names():
+    """#87/#139: freshness reads MAX of a load-time column, quoted like any other."""
+    connector = _postgres()
+    cur = _wire_cursor(connector, [{"latest": None}])
+
+    connector.get_latest_timestamp(HOSTILE_TABLE, HOSTILE_COLUMN)
+
+    assert _executed(cur.execute) == [
+        (f"SELECT MAX({POSTGRES_COLUMN}) AS latest FROM {POSTGRES_TABLE}",),
+    ]
+
+
 def test_postgres_metadata_lookups_bind_the_table_name():
     connector = _postgres()
     cur = _wire_cursor(connector, [None])
@@ -211,6 +223,23 @@ def test_mysql_column_stats_quote_hostile_names(fake_pymysql):
             f"  STDDEV({MYSQL_COLUMN}) AS stddev FROM {MYSQL_TABLE}",
         ),
     ]
+
+
+def test_mysql_latest_timestamp_quotes_hostile_names(fake_pymysql):
+    connector = _mysql()
+    cur = _wire_cursor(connector, [{"latest": None}])
+
+    connector.get_latest_timestamp(HOSTILE_TABLE, HOSTILE_COLUMN)
+
+    assert _executed(cur.execute) == [
+        (f"SELECT MAX({MYSQL_COLUMN}) AS latest FROM {MYSQL_TABLE}",),
+    ]
+
+
+def test_postgres_and_mysql_read_a_load_time_column_before_metadata(fake_pymysql):
+    """#139: their last-modified metadata is a maintenance time or a cached value."""
+    assert _postgres().METADATA_IS_LAST_WRITE is False
+    assert _mysql().METADATA_IS_LAST_WRITE is False
 
 
 def test_mysql_metadata_lookups_bind_the_table_name(fake_pymysql):

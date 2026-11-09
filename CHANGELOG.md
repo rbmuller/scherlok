@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Freshness on DuckDB, from a load-time column** — DuckDB keeps no per-table modification time, so freshness never fired there, and a pipeline that stopped loading went unnoticed. When a connector has no last-modified time, freshness now reads `MAX()` of the table's load-time column in one query: the first of `updated_at`, `modified_at`, `loaded_at`, `_loaded_at`, `synced_at`, `_fivetran_synced`, `ingested_at`, `inserted_at` and `created_at` it has, otherwise its first timestamp or date column whose name ends in `_at`, in any case. Business dates such as `birth_date` are never read, since the saved age gives the column's latest value away. A timestamp without a time zone is read as UTC, and one in the future counts as just updated. The profile records `freshness_source` (`metadata` or `column`) and `freshness_column`, an alert based on a column names it (`based on updated_at`) and carries it in its `column` field, and `scherlok report` shows it. Connectors gain `get_latest_timestamp(table, column)`, quoted per dialect. ([#87](https://github.com/rbmuller/scherlok/issues/87))
+
+### Changed
+- **PostgreSQL and MySQL date a table by its load-time column first** — their last-modified metadata is not the last write: PostgreSQL reports the latest vacuum or analyze, which only moves after enough rows change, so a large table receiving small loads looked stale; MySQL's `UPDATE_TIME` is cached for `information_schema_stats_expiry`, a day by default. Both now read the load-time column first and fall back to the metadata when the table has none. BigQuery and Snowflake keep reading their metadata first. A run is only compared with a run whose age came from the same source, so the first run after upgrading compares no freshness for a table that switched to its column. See [Freshness](https://rbmuller.github.io/scherlok/connectors/#freshness). ([#139](https://github.com/rbmuller/scherlok/issues/139))
+
 ## [1.3.1] — 2026-11-09
 
 ### Fixed

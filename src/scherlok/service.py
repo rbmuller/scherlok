@@ -202,7 +202,7 @@ def inspect_table(
     if stored_sch:
         anomalies.extend(detect_schema_drift(table, current_sch, stored_sch))
 
-    current_fresh = profile_freshness(connector, table)
+    current_fresh = profile_freshness(connector, table, (current_sch or {}).get("columns"))
     stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
     if stored_fresh and CHECK_FRESHNESS not in skip:
         anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))

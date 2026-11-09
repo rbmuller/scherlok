@@ -8,11 +8,27 @@
 | MySQL | `scherlok[mysql]` | `mysql://user:pass@host:3306/dbname` |
 | DuckDB | `scherlok[duckdb]` | `duckdb:///path/to/file.db` or `duckdb:///:memory:` |
 
-Every connector profiles through metadata and aggregate queries only (`information_schema`, `COUNT`, `COUNT(DISTINCT)`, `AVG`, `STDDEV`). Scherlok never copies rows out of your warehouse, and the profile store keeps aggregates only: see [What Scherlok stores](getting-started.md#what-scherlok-stores).
+Every connector profiles through metadata and aggregate queries only (`information_schema`, `COUNT`, `COUNT(DISTINCT)`, `AVG`, `STDDEV`, and `MAX` of a load-time column for freshness). Scherlok never copies rows out of your warehouse, and the profile store keeps aggregates only: see [What Scherlok stores](getting-started.md#what-scherlok-stores).
 
 [`scherlok reconcile`](reconcile.md) works on every connector with the same aggregate-only queries, and accepts schema-qualified names (`raw.orders`). On BigQuery and Snowflake it scans both tables in full; see [its cost](reconcile.md#cost-on-bigquery-and-snowflake).
 
 Want another warehouse? Databricks is tracked in [#37](https://github.com/rbmuller/scherlok/issues/37); the connector interface is five methods in `src/scherlok/connectors/base.py`.
+
+## Freshness
+
+Freshness compares how long ago a table changed with how long ago it had changed on the previous run. Where that time comes from depends on the warehouse:
+
+| Database | Read first | Then |
+|---|---|---|
+| BigQuery | the table's `last_modified_time` | the load-time column |
+| Snowflake | `LAST_ALTERED` in `INFORMATION_SCHEMA.TABLES` | the load-time column |
+| PostgreSQL | the load-time column | the latest vacuum or analyze in `pg_stat_user_tables`, which only moves after enough rows change |
+| MySQL | the load-time column | `UPDATE_TIME` in `information_schema.TABLES`, cached for `information_schema_stats_expiry` (a day by default) |
+| DuckDB | the load-time column | nothing: DuckDB keeps no modification time |
+
+The load-time column is `MAX()` of one timestamp or date column, in one query. The first of `updated_at`, `modified_at`, `loaded_at`, `_loaded_at`, `synced_at`, `_fivetran_synced`, `ingested_at`, `inserted_at` and `created_at` the table has wins, and otherwise its first timestamp column whose name ends in `_at`. Names match in any case. Business dates such as `birth_date` are never read, since the age Scherlok saves gives the column's latest value away. A timestamp without a time zone is read as UTC.
+
+Each profile records where its age came from (`freshness_source`: `metadata` or `column`, and `freshness_column`), and a run is only compared with a run that read the same thing. The first run after an upgrade that switches a table to its column compares nothing, and the next one does. An alert based on a column names it: `(… 6.0x overdue; based on updated_at)`.
 
 ## BigQuery notes
 

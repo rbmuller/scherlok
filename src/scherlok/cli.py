@@ -395,7 +395,7 @@ def investigate() -> None:
             sch = profile_schema(connector, table)
             store.save_profile(table, "schema", sch)
 
-            fresh = profile_freshness(connector, table)
+            fresh = profile_freshness(connector, table, sch.get("columns"))
             store.save_profile(table, "freshness", fresh)
 
             for col in sch.get("columns", []):

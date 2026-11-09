@@ -12,6 +12,10 @@ from scherlok.connectors.base import BaseConnector, quote_ansi_identifier
 class PostgresConnector(BaseConnector):
     """Connector for PostgreSQL databases."""
 
+    # pg_stat_user_tables only knows vacuum and analyze times, which move after
+    # enough rows change, not on every write (#139).
+    METADATA_IS_LAST_WRITE = False
+
     def __init__(self, connection_string: str) -> None:
         super().__init__(connection_string)
         self._conn: Any = None
