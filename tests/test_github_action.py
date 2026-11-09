@@ -27,6 +27,8 @@ from scherlok.service import SECRET_QUERY_KEY_PARTS
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "action" / "scherlok_action.py"
 ACTION_YML = REPO / "action.yml"
+# The Marketplace refuses to list an action whose description is longer.
+MARKETPLACE_DESCRIPTION_LIMIT = 125
 
 
 def _load_script():
@@ -696,7 +698,7 @@ def _steps(action: dict) -> dict[str, dict]:
 
 def test_the_action_is_ready_for_the_marketplace(action):
     assert action["name"] == "Scherlok Verify"
-    assert action["description"]
+    assert 0 < len(action["description"]) < MARKETPLACE_DESCRIPTION_LIMIT
     assert set(action["branding"]) == {"icon", "color"}
     assert action["runs"]["using"] == "composite"
     assert not (REPO / "action.yaml").exists()

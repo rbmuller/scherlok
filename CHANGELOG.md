@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **GitHub Action: a description the Marketplace accepts** — the Marketplace refuses an action description of 125 characters or more, and `action.yml`'s had 132, so Scherlok Verify could not be listed. It now reads "Fail the pull request when data drifts from the learned Scherlok baseline, with one comment listing every anomaly." (114), and a test keeps it under the limit.
+
 ## [1.4.0] — 2026-11-09
 
 ### Added
