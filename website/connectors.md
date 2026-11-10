@@ -16,7 +16,9 @@ Want another warehouse? Databricks is tracked in [#37](https://github.com/rbmull
 
 ## Freshness
 
-Freshness compares how long ago a table changed with how long ago it had changed on the previous run. Where that time comes from depends on the warehouse:
+Freshness compares how long ago a table changed (its age) with the age it usually reaches before its next load: WARNING at 2x, CRITICAL at 4x. Each load the recent runs saw counts once, at the oldest age a run read it, and the expected age is the upper quartile of those, at least 1 hour. A stall is one load however many runs it lasts, so it keeps alerting while five earlier loads remain among the latest 30 runs, and a table watched more often than it loads is not overdue on the eve of each load. Until five loads are among the latest 30 runs, the age is compared with the previous run's, and not at all when that was under an hour; a table whose 30 latest runs never hold five loads, such as a daily table watched hourly, stays on that rule.
+
+Where the age comes from depends on the warehouse:
 
 | Database | Read first | Then |
 |---|---|---|
