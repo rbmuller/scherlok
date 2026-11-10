@@ -47,7 +47,7 @@ A run that finds a CRITICAL anomaly on a table saves the anomaly but none of tha
 
 This holds for `watch`, `ci`, `check`, `dbt`, `dbt-run-and-watch` and the MCP `watch`, `check` and `investigate` tools. `verify` never saves profiles at all. When the change is intended, such as a planned backfill or a new column, a person makes it the new normal with `scherlok accept`.
 
-`freshness_critical` is the exception and is learned like a warning. Freshness compares a table's age with its age on the previous run, so keeping the old reading would report a table updated less often than it is watched, such as a weekly table watched daily, on every run until its next update.
+`freshness_critical` is the exception and is learned like a warning. Until a table's loads are learned, freshness compares its age with the previous run's, so keeping the old reading would report a table updated less often than it is watched, such as a weekly table watched daily, on every run until its next update. Learning a stall does not silence it: the runs of a stall count as one load (see [Freshness](connectors.md#freshness)).
 
 A NULL rate that falls is at most a WARNING, however far it falls. Fewer NULLs is also what a fixed column looks like: a new column that was NULL in every row is learned as a WARNING, so a CRITICAL for its fix would fail every run after it.
 

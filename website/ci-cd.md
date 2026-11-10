@@ -95,7 +95,7 @@ Each anomaly carries the facts behind its `message`, so a script or an agent can
 |---|---|
 | `column` | The column involved; `null` for a table-level anomaly such as `volume_drop`. |
 | `metric` | What was measured: `row_count`, `column_type`, `hours_since_update`, `null_rate`, `null_count`, `mean`, `distinct_count`, or `distinct_ratio` (distinct values per non-NULL row, compared on near-unique columns); [`reconcile`](reconcile.md) adds `duplicate_keys`, `missing_keys`, `extra_keys` and `sum`. |
-| `baseline` | The value compared against: the stored profile, or the median of recent runs once there is enough history. `null` for a table seen for the first time and for an added column. |
+| `baseline` | The value compared against: the stored profile, or a value learned from recent runs once there is enough history (the median for most metrics; for freshness, the age the table usually reaches before its next load). `null` for a table seen for the first time and for an added column. |
 | `current` | The value on this run; `null` for a removed column. |
 | `change_pct` | Signed change from `baseline` to `current` in percent, one decimal, negative when the value fell. For `null_rate` it is the relative change of the rate, not percentage points. `null` unless both are numbers and `baseline` is not 0. |
 | `hint` | One fixed sentence per anomaly type on where to look first. `--explain` gives a reasoned hypothesis instead. |
