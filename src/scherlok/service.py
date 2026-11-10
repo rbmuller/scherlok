@@ -66,11 +66,10 @@ AGAINST_EXAMPLE = "postgresql://db.example.com/shop"
 # Learning it would make the broken state the reference and silence the alert,
 # so the alert repeats on every run until the data recovers.
 BASELINE_BLOCKING_SEVERITY = Severity.CRITICAL
-# Freshness is the exception: until a table's loads are learned it compares
-# the table's age with the previous run's, so keeping the old reading would
-# report a table updated less often than it is watched (a weekly table watched
-# daily) on every run, and block learning its other profiles meanwhile. A
-# learned stall still alerts: its runs count as one load (#149).
+# Freshness is the exception: it compares a table's age with its age on the
+# previous run, so keeping the old reading would report a table updated less
+# often than it is watched (a weekly table watched daily) on every run, and
+# block learning its other profiles meanwhile.
 NON_BLOCKING_ANOMALY_TYPES = frozenset({FRESHNESS_CRITICAL})
 
 ANOMALIES_KEY = "anomalies"
@@ -213,11 +212,7 @@ def inspect_table(
         )
         stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
         if stored_fresh:
-            anomalies.extend(
-                detect_freshness_anomalies(
-                    table, current_fresh, stored_fresh, history=freshness_history(store, table)
-                )
-            )
+            anomalies.extend(detect_freshness_anomalies(table, current_fresh, stored_fresh))
 
     current_dists: dict[str, dict] = {}
     for col in (current_sch or {}).get("columns", []):
@@ -267,13 +262,6 @@ def inspect_table(
         schema=current_sch,
         freshness=current_fresh,
         distributions=current_dists,
-    )
-
-
-def freshness_history(store: ProfileStore, table: str) -> list[dict]:
-    """The recent freshness profiles of ``table`` a cadence is learned from (#149)."""
-    return store.get_profile_history(
-        table, FRESHNESS_PROFILE, days=None, limit=ADAPTIVE_HISTORY_LIMIT
     )
 
 

@@ -83,14 +83,12 @@ from scherlok.runs import (
 )
 from scherlok.service import (
     AGAINST_EXAMPLE,
-    FRESHNESS_PROFILE,
     AgainstScopeError,
     UnknownTablesError,
     VerificationResult,
     against_scope,
     blocks_baseline,
     connection_scope,
-    freshness_history,
     normalize_ignore,
     open_baseline_store,
     profile_and_detect,
@@ -2170,14 +2168,12 @@ def _table_health(
     current_vol = profile_volume(connector, table)
     current_sch = profile_schema(connector, table)
     current_fresh = profile_freshness(connector, table, current_sch.get("columns"))
-    stored_fresh = store.get_latest_profile(table, FRESHNESS_PROFILE)
+    stored_fresh = store.get_latest_profile(table, "freshness")
     anomalies = detect_volume_anomalies(table, current_vol, vol)
     anomalies.extend(detect_schema_drift(table, current_sch, sch))
     if stored_fresh:
         anomalies.extend(
-            detect_freshness_anomalies(
-                table, current_fresh, stored_fresh, history=freshness_history(store, table)
-            )
+            detect_freshness_anomalies(table, current_fresh, stored_fresh)
         )
     if any(a["severity"].value == "CRITICAL" for a in anomalies):
         return "critical"

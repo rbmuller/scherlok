@@ -7,9 +7,8 @@ without parsing the sentence:
 - ``column``: the column involved, or None for a table-level anomaly.
 - ``metric``: what was measured, one of the ``METRIC_*`` names below.
 - ``baseline``: the value the detector compared against: the stored profile,
-  or a value learned from history when there is enough (the median; for
-  freshness, the age a table usually reaches before its next load). None
-  when there is no baseline (a new table, an added column).
+  or the learned median when there is enough history. None when there is no
+  baseline (a new table, an added column).
 - ``current``: the value measured on this run. None when there is none (a
   removed column).
 - ``change_pct``: the signed relative change from ``baseline`` to ``current``
