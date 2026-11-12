@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from scherlok.dashboard.render import render_dashboard
+from scherlok.dashboard.render import LOGO_PATH, MODULE_DIR, render_dashboard
 from scherlok.detector.severity import Severity
 from scherlok.store.sqlite import ProfileStore
+
+DOCS_ICON = Path(__file__).resolve().parent.parent / "website" / "assets" / "scherlok-icon.svg"
 
 
 @pytest.fixture
@@ -34,7 +36,18 @@ def test_render_returns_html_string(store_with_data):
 def test_render_includes_logo_data_uri(store_with_data):
     html = render_dashboard(store_with_data)
     # Logo is embedded as base64 (no http fetch needed)
-    assert "data:image/png;base64," in html
+    assert "data:image/svg+xml;base64," in html
+
+
+def test_the_logo_ships_inside_the_package():
+    """An installed Scherlok has no repo root, so the logo sits next to the module."""
+    assert LOGO_PATH.parent == MODULE_DIR
+    assert LOGO_PATH.is_file()
+
+
+def test_the_dashboard_logo_is_the_docs_icon():
+    """One icon for the README, the docs and the dashboard: the two copies never drift."""
+    assert LOGO_PATH.read_bytes() == DOCS_ICON.read_bytes()
 
 
 def test_render_invalid_theme_raises(store_with_data):
