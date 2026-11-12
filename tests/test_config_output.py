@@ -35,6 +35,7 @@ def test_nothing_configured():
         "connection_source": None,
         "store": None,
         "baseline_locked": False,
+        "tables": None,
     }
 
 
@@ -64,6 +65,13 @@ def test_store_and_lock(monkeypatch):
     payload = _config_json()
     assert payload["store"] == "gs://reader:***@bucket/scherlok/profiles.db"
     assert payload["baseline_locked"] is True
+
+
+def test_saved_tables():
+    ScherlokConfig(
+        connection_string=SAVED, settings={config.TABLES_SETTING: ["orders", "customers"]}
+    ).save()
+    assert _config_json()["tables"] == ["orders", "customers"]
 
 
 @pytest.mark.parametrize("change", [["--store", "s3://b/p.db"], ["--baseline-locked"]])

@@ -346,18 +346,21 @@ def verify_tables(
     tables: list[str] | None = None,
     fail_on: str = FAIL_ON_CRITICAL,
     *,
+    saved_tables: list[str] | None = None,
     against: str | None = None,
     ignore: Iterable[str] | None = None,
 ) -> VerificationResult:
     """Compare tables with their stored baseline and decide the gate. Saves nothing.
 
     ``tables`` limits the run to those names (unknown names raise
-    ``UnknownTablesError``); ``None`` verifies every visible table. A table
-    without a baseline still gets the new-table checks, but it is listed apart
-    and never counted as verified. Naming it in ``tables`` says it was just
-    built, so its WARNING new-table findings (empty table, all-NULL column,
-    duplicate key) count as CRITICAL. Running this twice on the same data
-    returns the same result.
+    ``UnknownTablesError``); without them the run covers ``saved_tables``,
+    the ones `scherlok connect --table` saved, else every visible table. A
+    table without a baseline still gets the new-table checks, but it is
+    listed apart and never counted as verified. Naming it in ``tables`` says
+    it was just built, so its WARNING new-table findings (empty table,
+    all-NULL column, duplicate key) count as CRITICAL; a saved table is only
+    monitored, so its findings keep their severity. Running this twice on
+    the same data returns the same result.
 
     ``against`` is the scope of another database (see ``against_scope``) whose
     baseline the connection's tables are compared with, and ``store`` must
@@ -374,7 +377,7 @@ def verify_tables(
     if against is not None:
         _check_against(connector, store, against)
         skip |= AGAINST_SKIPPED_CHECKS
-    for table in select_tables(tables, connector.list_tables()):
+    for table in select_tables(tables or saved_tables, connector.list_tables()):
         if has_baseline(store, table):
             result.tables_verified.append(table)
         else:

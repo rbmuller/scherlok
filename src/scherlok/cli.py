@@ -38,7 +38,12 @@ from scherlok.approvals import (
     approver,
     propose_baseline,
 )
-from scherlok.config import BASELINE_LOCKED_SETTING, ENV_BASELINE_LOCKED, ScherlokConfig
+from scherlok.config import (
+    BASELINE_LOCKED_SETTING,
+    ENV_BASELINE_LOCKED,
+    TABLES_SETTING,
+    ScherlokConfig,
+)
 from scherlok.connectors import get_connector
 from scherlok.connectors.base import UNKNOWN_NAMESPACE, RelationNamespace
 from scherlok.dbt.manifest import DEFAULT_TARGET_PATH
@@ -112,6 +117,14 @@ OUTPUT_FORMATS = (OUTPUT_TEXT, OUTPUT_JSON)
 
 # `verify --dbt-project --output json`: built models the connection can't see.
 DBT_MODELS_NOT_FOUND_KEY = "dbt_models_not_found"
+
+# The tables a command runs on (#156): those named with --table, else the
+# ones `connect --table` saved, else every table the connection lists.
+TABLE_FLAG = "--table"
+TABLE_OPTION_HELP = (
+    "Only this table. Repeat for several; without it, the tables saved with "
+    "`scherlok connect --table`, else every table."
+)
 
 
 if TYPE_CHECKING:
@@ -213,6 +226,26 @@ def _ignore_or_exit(ignore: list[str] | None) -> list[str]:
         raise typer.Exit(code=1) from exc
 
 
+def _tables_or_exit(connector: object, requested: list[str] | None = None) -> list[str]:
+    """The tables a run covers: `requested`, else the saved ones, else every table.
+
+    Exits 1 before any work when a name is not on the connection, so a
+    monitored table that disappeared is reported, never skipped.
+    """
+    saved = ScherlokConfig.load().saved_tables()
+    try:
+        return select_tables(requested or saved, connector.list_tables())
+    except UnknownTablesError as exc:
+        hint = (
+            " They were saved with [bold]scherlok connect --table[/bold]; "
+            "run it again to change them."
+            if saved and not requested
+            else ""
+        )
+        out_error(f"[red]{rich_escape(str(exc))}.[/red]{hint}")
+        raise typer.Exit(code=1) from exc
+
+
 def _print_connect_failure(connector: object) -> None:
     """Render a 'failed to connect' header plus connector.last_error if available."""
     out_error("[red]Failed to connect to the database.[/red]")
@@ -247,14 +280,24 @@ def connect(
     connection_string: str = typer.Argument(
         None, help="Database connection string (e.g. postgresql://user:pass@host/db)"
     ),
+    table: list[str] = typer.Option(
+        None, TABLE_FLAG,
+        help="Monitor only this table of the dataset or schema. Repeat for several; "
+        "omit to monitor every table.",
+    ),
 ) -> None:
     """Validate a database connection and save it to config.
 
-    Run with no argument to print example connection strings for each
-    supported adapter.
+    The dataset or schema comes from the connection string. `--table` saves
+    the tables to monitor, checked against the connection first: investigate,
+    watch, ci, check, verify, status, report and dashboard then cover only
+    those, unless a command names its own with --table. Without it, every
+    table is monitored, and a list saved before is cleared. Run with no
+    argument to print example connection strings for each supported adapter.
 
     Example:
         scherlok connect postgresql://user:pass@localhost:5432/mydb
+        scherlok connect bigquery://my-project/analytics --table orders --table customers
     """
     if not connection_string:
         _print_connect_examples()
@@ -263,16 +306,26 @@ def connect(
     connector = get_connector(connection_string)
     with console.status("Connecting..."):
         ok = connector.connect()
-
-    if ok:
-        cfg = ScherlokConfig.load()
-        cfg.connection_string = connection_string
-        cfg.save()
-        tables = connector.list_tables()
-        console.print(f"[green]Connected successfully.[/green] Found {len(tables)} tables.")
-    else:
+    if not ok:
         _print_connect_failure(connector)
         raise typer.Exit(code=1)
+
+    visible = connector.list_tables()
+    try:
+        monitored = select_tables(table, visible) if table else None
+    except UnknownTablesError as exc:
+        out_error(f"[red]{rich_escape(str(exc))}. Nothing was saved.[/red]")
+        raise typer.Exit(code=1) from exc
+
+    cfg = ScherlokConfig.load()
+    cfg.connection_string = connection_string
+    cfg.settings[TABLES_SETTING] = monitored
+    cfg.save()
+    found = f"[green]Connected successfully.[/green] Found {len(visible)} tables"
+    if monitored:
+        console.print(f"{found}; monitoring {len(monitored)}: {_table_preview(monitored)}.")
+    else:
+        console.print(f"{found}.")
 
 
 @app.command()
@@ -323,6 +376,9 @@ def config(
         console.print(f"Current store: [cyan]{current}[/cyan]")
         locked = "yes" if cfg.baseline_locked() else "no"
         console.print(f"Baselines locked: [cyan]{locked}[/cyan]")
+        saved = cfg.saved_tables()
+        monitored = ", ".join(rich_escape(t) for t in saved) if saved else "every table"
+        console.print(f"Tables: [cyan]{monitored}[/cyan]")
         return
 
     if store is not None:
@@ -353,6 +409,7 @@ def _config_summary(cfg: ScherlokConfig) -> dict:
         "connection_source": source,
         "store": redact_connection(store) if store else None,
         BASELINE_LOCKED_SETTING: cfg.baseline_locked(),
+        TABLES_SETTING: cfg.saved_tables(),
     }
 
 
@@ -367,24 +424,28 @@ def _exit_if_baseline_locked(cfg: ScherlokConfig) -> None:
 
 
 @app.command()
-def investigate() -> None:
-    """Profile all tables and store results.
+def investigate(
+    table: list[str] = typer.Option(None, TABLE_FLAG, help=TABLE_OPTION_HELP),
+) -> None:
+    """Profile tables and store results.
 
-    Overwrites every table's baseline, without asking or recording an
-    approval; `scherlok accept` does both, for the tables you name. Refused
-    while baselines are locked.
+    Covers the tables named with --table, else those saved with `scherlok
+    connect --table`, else every table. Overwrites each one's baseline,
+    without asking or recording an approval; `scherlok accept` does both,
+    for the tables you name. Refused while baselines are locked.
 
     Example:
         scherlok investigate
+        scherlok investigate --table orders
     """
     _exit_if_baseline_locked(ScherlokConfig.load())
     connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
+    tables = _tables_or_exit(connector, table)
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
         store = _open_store(connector.connection_string)
-        tables = connector.list_tables()
 
         if not tables:
             out_info("[yellow]No tables found.[/yellow]")
@@ -577,9 +638,10 @@ def _run_watch(
     """Run the watch logic: profile + detect + alert. Returns all anomalies.
 
     Reused by `watch`, `ci` and `check`, recorded as a run under `command`,
-    passing or not. When `tables` is None, all tables visible to the
-    connector are used. When `connector` is None, one is loaded from the
-    saved config. `fail_on` feeds the --explain context and the run record
+    passing or not. Without `tables`, the run covers the tables saved with
+    `connect --table`, else every table the connector lists; an unknown name
+    exits 1 before any work. When `connector` is None, one is loaded from
+    the saved config. `fail_on` feeds the --explain context and the run record
     (CRITICAL when None, as `watch` exits); exit-code policy stays with the
     callers. With baselines locked (#109) no profile is saved; anomalies and
     the run record still are.
@@ -587,6 +649,7 @@ def _run_watch(
     if connector is None:
         connector = _get_connector_or_exit()
     cfg = ScherlokConfig.load()
+    tables = _tables_or_exit(connector, tables)
 
     from scherlok.config import PROFILES_DB
     with sync_context(cfg.get_store(), PROFILES_DB):
@@ -594,8 +657,6 @@ def _run_watch(
         run = RunRecord(
             command=command, scope=store.scope, fail_on=fail_on or FAIL_ON_CRITICAL
         )
-        if tables is None:
-            tables = connector.list_tables()
         all_anomalies: list[dict] = []
         kept_baselines: list[str] = []
         locked = cfg.baseline_locked()
@@ -647,25 +708,34 @@ def watch(
     schedule: str | None = typer.Option(
         None, "--schedule", help="Repeat on a five-field cron schedule (local time).",
     ),
+    table: list[str] = typer.Option(None, TABLE_FLAG, help=TABLE_OPTION_HELP),
 ) -> None:
     """Compare current state vs stored profile. Detect anomalies.
 
+    Covers the tables named with --table, else those saved with `scherlok
+    connect --table`, else every table.
+
     Example:
         scherlok watch
+        scherlok watch --table orders --table customers
         scherlok watch --webhook https://hooks.slack.com/...
         scherlok watch --email alice@company.com --email bob@company.com
         scherlok watch --webhook https://hooks.slack.com/... --explain
         scherlok watch --schedule "0 6 * * *"
     """
     if schedule is None:
-        anomalies = _run_watch(webhook=webhook, emails=email or None, explain=explain)
+        anomalies = _run_watch(
+            webhook=webhook, emails=email or None, tables=table or None, explain=explain
+        )
         raise typer.Exit(code=exit_code_for(anomalies))
 
     from scherlok.schedule import ScheduleError, run_schedule
 
     def run_once() -> int:
         try:
-            anomalies = _run_watch(webhook=webhook, emails=email or None, explain=explain)
+            anomalies = _run_watch(
+                webhook=webhook, emails=email or None, tables=table or None, explain=explain
+            )
             return exit_code_for(anomalies)
         except typer.Exit as exc:
             # A failed connection should be logged as a run failure, rather than
@@ -696,6 +766,7 @@ def _run_ci(
     fail_on: str,
     explain: bool = False,
     command: str = COMMAND_CI,
+    tables: list[str] | None = None,
 ) -> None:
     fail_on = _fail_on_or_exit(fail_on)
 
@@ -715,6 +786,7 @@ def _run_ci(
     anomalies = _run_watch(
         webhook=webhook,
         emails=email or None,
+        tables=tables,
         connector=connector,
         explain=explain,
         fail_on=fail_on,
@@ -741,6 +813,7 @@ def ci(
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
     explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
+    table: list[str] = typer.Option(None, TABLE_FLAG, help=TABLE_OPTION_HELP),
 ) -> None:
     """All-in-one CI/CD command: connect + investigate + watch + exit code.
 
@@ -755,7 +828,7 @@ def ci(
             scherlok config --store s3://my-bucket/scherlok/profiles.db
             scherlok ci $DATABASE_URL --webhook $SLACK_URL --fail-on critical
     """
-    _run_ci(connection_string, webhook, email, fail_on, explain)
+    _run_ci(connection_string, webhook, email, fail_on, explain, tables=table or None)
 
 
 @app.command()
@@ -774,9 +847,13 @@ def check(
         help="Severity that triggers exit code 1: 'critical' (default) or 'warning'",
     ),
     explain: bool = typer.Option(False, "--explain", help=EXPLAIN_FLAG_HELP),
+    table: list[str] = typer.Option(None, TABLE_FLAG, help=TABLE_OPTION_HELP),
 ) -> None:
     """Assertion-only CI alias for `scherlok ci --fail-on critical`."""
-    _run_ci(connection_string, webhook, email, fail_on, explain, command=COMMAND_CHECK)
+    _run_ci(
+        connection_string, webhook, email, fail_on, explain,
+        command=COMMAND_CHECK, tables=table or None,
+    )
 
 
 @dataclass
@@ -853,8 +930,9 @@ def _run_verify(
     With `against` (a scope) the baseline is that database's; the run is
     still recorded under the connection's scope, noting `against`.
 
-    `tables=None` verifies every table. With `dbt_scope`, the tables its
-    models resolve to are added to `tables`, and when that leaves none,
+    `tables=None` verifies the tables saved with `connect --table`, else
+    every table. With `dbt_scope`, the tables its models resolve to are added
+    to `tables` and the saved ones don't apply; when that leaves none,
     nothing is verified: a dbt run that built nothing must not check the
     whole warehouse.
     """
@@ -882,7 +960,13 @@ def _run_verify(
                 )
                 if nothing_to_verify
                 else verify_tables(
-                    connector, store, tables, fail_on, against=against, ignore=ignore
+                    connector,
+                    store,
+                    tables,
+                    fail_on,
+                    saved_tables=None if dbt_scope is not None else cfg.saved_tables(),
+                    against=against,
+                    ignore=ignore,
                 )
             )
             record = run.finish(result.tables_checked, result.anomalies).to_dict()
@@ -940,8 +1024,9 @@ def _print_verification(result: VerificationResult) -> None:
 @app.command()
 def verify(
     table: list[str] = typer.Option(
-        None, "--table",
-        help="Only verify this table. Repeat to verify several; omit for every table.",
+        None, TABLE_FLAG,
+        help="Only verify this table, as just built. Repeat to verify several; without "
+        "it, the tables saved with `scherlok connect --table`, else every table.",
     ),
     fail_on: str = typer.Option(
         FAIL_ON_CRITICAL, "--fail-on",
@@ -1244,7 +1329,7 @@ def _print_proposals(proposals: list[ProposedBaseline], reason: str, approved_by
 @app.command()
 def accept(
     table: list[str] = typer.Option(
-        ..., "--table",
+        ..., TABLE_FLAG,
         help="Table whose current state becomes its baseline. Repeat to accept several.",
     ),
     reason: str = typer.Option(
@@ -2054,6 +2139,7 @@ def dashboard(
                 theme=theme,
                 project_name=display_name,
                 connection_string=conn_str,
+                tables=cfg.saved_tables(),
             )
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -2113,8 +2199,8 @@ def report(
 
     try:
         connector = _get_connector_or_exit()
+        tables = _tables_or_exit(connector)
         store = _open_store(connector.connection_string)
-        tables = connector.list_tables()
 
         if not tables:
             if json_mode:
@@ -2236,8 +2322,8 @@ def status(
 
     try:
         connector = _get_connector_or_exit()
+        tables = _tables_or_exit(connector)
         store = _open_store(connector.connection_string)
-        tables = connector.list_tables()
 
         records: list[dict] = []
         latest = store.get_latest_anomaly_per_table()

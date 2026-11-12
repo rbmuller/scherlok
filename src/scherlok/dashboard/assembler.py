@@ -20,9 +20,19 @@ def assemble_view(
     project_name: str = "scherlok",
     connection_string: str = "",
     dbt_context: dict | None = None,
+    tables: list[str] | None = None,
 ) -> dict:
-    """Build the full view-model dict consumed by the Jinja template."""
+    """Build the full view-model dict consumed by the Jinja template.
+
+    ``tables`` limits the view to those tables, the ones `scherlok connect
+    --table` saved: a table left out stops being profiled, and would
+    otherwise age until the dashboard called it stale. None shows every
+    table in the store.
+    """
     anomalies = store.get_anomaly_history(days=days)
+    if tables:
+        wanted = set(tables)
+        anomalies = [a for a in anomalies if a["table"] in wanted]
     last_watch_iso = anomalies[0]["detected_at"] if anomalies else None
 
     # "Active" = the most recent batch of detections (same timestamp).
@@ -30,10 +40,10 @@ def assemble_view(
     active, history = _split_active_and_history(anomalies, last_watch_iso)
     incidents = group_anomalies(active)
 
-    tables = _build_table_health(store, days, incidents)
-    stale_tables = _build_stale_tables(store, days, tables)
+    health = _build_table_health(store, days, incidents, tables)
+    stale_tables = _build_stale_tables(store, days, health)
 
-    kpis = _kpis(tables, incidents, days)
+    kpis = _kpis(health, incidents, days)
     meta = _meta(
         project_name=project_name,
         connection_string=connection_string,
@@ -47,7 +57,7 @@ def assemble_view(
         "dbt_context": dbt_context,
         "trend": _anomaly_trend(anomalies, days),
         "incidents": incidents,
-        "tables": tables,
+        "tables": health,
         "stale_tables": stale_tables,
         "history": history,
     }
@@ -69,10 +79,13 @@ def _build_table_health(
     store: ProfileStore,
     days: int,
     incidents: list[Incident],
+    tables: list[str] | None = None,
 ) -> list[dict]:
-    """Return one health row per table that has a stored profile."""
+    """Return one health row per table that has a stored profile, of ``tables`` when given."""
     incident_by_table = {i.table: i for i in incidents}
     tables_with_profiles = _discover_tables(store)
+    if tables:
+        tables_with_profiles &= set(tables)
 
     out: list[dict] = []
     for table in sorted(tables_with_profiles):

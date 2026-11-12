@@ -93,6 +93,24 @@ def test_assemble_active_anomalies_split_from_history(store):
     assert len(view["history"]) == 1  # the older one is history
 
 
+def test_assemble_only_the_saved_tables(store):
+    """A table left out of `connect --table` stops being profiled: never call it stale (#156)."""
+    now = datetime.now(timezone.utc)
+    _seed_profile(store, "orders", 1000, (now - timedelta(hours=1)).isoformat())
+    _seed_profile(store, "legacy_events", 900, (now - timedelta(hours=48)).isoformat())
+    store.save_anomalies([
+        {"table": "legacy_events", "type": "volume_drop", "severity": Severity.CRITICAL,
+         "message": "Row count dropped 60.0% (10 -> 4)"},
+    ])
+
+    view = assemble_view(store, tables=["orders"])
+
+    assert [table["name"] for table in view["tables"]] == ["orders"]
+    assert view["stale_tables"] == []
+    assert view["incidents"] == []
+    assert view["history"] == []
+
+
 def test_assemble_dbt_context_passthrough(store):
     ctx = {"project_name": "jaffle_shop", "adapter": "postgres",
            "models_count": 3, "sources_count": 1}

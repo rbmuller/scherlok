@@ -119,7 +119,7 @@ def test_cli_without_schedule_retains_single_run():
     with patch("scherlok.cli._run_watch", return_value=[]) as one_watch:
         result = CliRunner().invoke(app, ["watch"])
     assert result.exit_code == 0
-    one_watch.assert_called_once_with(webhook=None, emails=None, explain=False)
+    one_watch.assert_called_once_with(webhook=None, emails=None, tables=None, explain=False)
 
 
 def test_cli_scheduled_ticks_reuse_run_watch():
@@ -134,7 +134,7 @@ def test_cli_scheduled_ticks_reuse_run_watch():
         result = CliRunner().invoke(app, ["watch", "--schedule", "*/5 * * * *", "--explain"])
     assert result.exit_code == 0
     scheduler.assert_called_once()
-    one_watch.assert_called_once_with(webhook=None, emails=None, explain=True)
+    one_watch.assert_called_once_with(webhook=None, emails=None, tables=None, explain=True)
 
 
 def test_cli_missing_croniter_exits_with_hint(monkeypatch):

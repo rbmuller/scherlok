@@ -13,6 +13,7 @@ scherlok ci "$DATABASE_URL" --webhook "$SLACK_WEBHOOK" --fail-on critical
 - First run: profiles everything and runs the new-table checks, since there is nothing to compare against yet: an empty table, a column NULL in every row or duplicates in `id` / `<singular table>_id` (WARNING), one value in 100+ non-NULL rows (INFO). With the default `--fail-on critical` it exits 0 and shows them; `--fail-on warning` fails on them.
 - Later runs: compares against the stored baseline, exits 1 on any CRITICAL anomaly (`--fail-on warning` to be stricter).
 - Baselines must survive between runs: point `scherlok config --store` at an S3, GCS or Azure Blob path so each runner syncs the same profiles file.
+- `--table orders --table customers` limits the run to those tables. Without it, `ci` covers the tables saved with `scherlok connect --table`, else every table (see [Choosing the tables](getting-started.md#choosing-the-tables)).
 
 ## Read-only gate: `scherlok verify`
 

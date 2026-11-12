@@ -27,6 +27,7 @@ def render_dashboard(
     project_name: str = "scherlok",
     connection_string: str = "",
     dbt_context: dict | None = None,
+    tables: list[str] | None = None,
 ) -> str:
     """Render the full dashboard HTML as a string.
 
@@ -38,6 +39,8 @@ def render_dashboard(
         connection_string: Connection URL (will be redacted before rendering).
         dbt_context: Optional dict with dbt project metadata. When None,
             the dbt context section is omitted.
+        tables: Only show these tables (`scherlok connect --table`); None
+            shows every table in the store.
     """
     if theme not in VALID_THEMES:
         raise ValueError(f"theme must be one of {sorted(VALID_THEMES)}, got {theme!r}")
@@ -48,6 +51,7 @@ def render_dashboard(
         project_name=project_name,
         connection_string=connection_string,
         dbt_context=dbt_context,
+        tables=tables,
     )
 
     css = STYLES_PATH.read_text(encoding="utf-8")
