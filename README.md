@@ -12,12 +12,7 @@
 
 <br><br>
 
-<img src="website/assets/scherlok-icon.svg" alt="Scherlok" width="96">
-
-<h1>Scherlok</h1>
-
-<h3><em>"Don't wait for your data pipelines to break."</em></h3>
-<p>Scherlok: data reliability for the AI era.</p>
+<img src="assets/scherlok-hero.svg" alt="Scherlok: don't wait for your data pipelines to break. Data reliability for the AI era." width="100%">
 
 <p><strong>Zero-config anomaly detection for your database tables.</strong><br>
 No YAML, no rules, no thresholds. Scherlok learns what "normal" looks like, then tells you when something changes.</p>
