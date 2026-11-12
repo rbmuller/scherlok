@@ -13,6 +13,8 @@ hooks:
 
 theme:
   name: material
+  logo: assets/scherlok-icon.svg
+  favicon: assets/scherlok-icon.svg
   features:
     - navigation.sections
     - navigation.top

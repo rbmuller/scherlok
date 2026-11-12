@@ -14,8 +14,10 @@ MODULE_DIR = Path(__file__).parent
 TEMPLATE_PATH = MODULE_DIR / "template.html"
 STYLES_PATH = MODULE_DIR / "styles.css"
 
-# Logo lives at repo root, two levels up from this module
-LOGO_PATH = MODULE_DIR.parent.parent.parent / "assets" / "scherlok-logo-96.png"
+# Shipped inside the package, so an installed Scherlok embeds it too. The same
+# file is website/assets/scherlok-icon.svg (README and docs).
+LOGO_PATH = MODULE_DIR / "scherlok-icon.svg"
+LOGO_MEDIA_TYPE = "image/svg+xml"
 
 VALID_THEMES = {"auto", "dark", "light"}
 
@@ -81,4 +83,4 @@ def _logo_data_uri() -> str:
     if not LOGO_PATH.is_file():
         return ""
     payload = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{payload}"
+    return f"data:{LOGO_MEDIA_TYPE};base64,{payload}"

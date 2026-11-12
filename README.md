@@ -12,7 +12,7 @@
 
 <br><br>
 
-<img src="assets/scherlok-logo.png" alt="Scherlok" width="120">
+<img src="website/assets/scherlok-icon.svg" alt="Scherlok" width="96">
 
 <h1>Scherlok</h1>
 

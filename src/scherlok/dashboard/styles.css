@@ -62,7 +62,7 @@ header {
   gap: 16px;
 }
 .brand { display: flex; align-items: center; gap: 16px; }
-.brand img.logo { width: 72px; height: 72px; object-fit: contain; }
+.brand img.logo { width: 48px; height: 48px; object-fit: contain; }
 .brand h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .brand .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 header .meta { color: var(--muted); font-size: 12px; text-align: right; }
