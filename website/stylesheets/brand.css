@@ -1,0 +1,26 @@
+/* Scherlok brand colours for the docs: a near-black header and teal links,
+   matching the logo (neon #2EF2C8 lens, red #FF4D6D anomaly). */
+:root {
+  --md-primary-fg-color: #0B1018;
+  --md-primary-fg-color--light: #111824;
+  --md-primary-fg-color--dark: #05070B;
+  --md-primary-bg-color: #E4EEEB;
+  --md-accent-fg-color: #0F766E;
+  --md-accent-fg-color--transparent: rgba(15, 118, 110, 0.1);
+}
+
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #0F766E;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0B0F15;
+  --md-accent-fg-color: #2EF2C8;
+  --md-accent-fg-color--transparent: rgba(46, 242, 200, 0.1);
+  --md-typeset-a-color: #2EF2C8;
+}
+
+/* A thin teal line keeps the near-black header apart from the dark page. */
+.md-header {
+  border-bottom: 1px solid rgba(46, 242, 200, 0.14);
+}
