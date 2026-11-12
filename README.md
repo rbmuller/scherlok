@@ -16,6 +16,9 @@
 
 <h1>Scherlok</h1>
 
+<h3><em>"Don't wait for your data pipelines to break."</em></h3>
+<p>Scherlok: data reliability for the AI era.</p>
+
 <p><strong>Zero-config anomaly detection for your database tables.</strong><br>
 No YAML, no rules, no thresholds. Scherlok learns what "normal" looks like, then tells you when something changes.</p>
 
