@@ -67,15 +67,15 @@ BigQuery charges by bytes scanned. **An `investigate` run is not free** — know
 | Per column: `AVG`, `STDDEV` | scans that column | **Yes** |
 | Per column: the `COUNT(*)` above again, for the NULL rate | same as the row count | **Yes** |
 
-For a dataset with **T** tables averaging **C** columns each: ~`T + 3·T·C` billed scans per `investigate` / `watch`. A 10-table dataset with 100-column-wide tables ≈ 3,010 queries. Most are tiny because they read a single column, but plan accordingly.
+For **T** monitored tables averaging **C** columns each: ~`T + 3·T·C` billed scans per `investigate` / `watch`. T is every table of the dataset unless `scherlok connect --table` names some. A 10-table dataset with 100-column-wide tables ≈ 3,010 queries. Most are tiny because they read a single column, but plan accordingly.
 
 **Recommendations for production:**
 
-- Prototype on a single small table with `scherlok investigate --select <table>` before pointing at the full dataset (the [`--select` filter](https://github.com/rbmuller/scherlok#cli-reference) limits scope).
+- Prototype on a single small table with `scherlok investigate --table <table>` before pointing at the full dataset, then save the tables to monitor with `scherlok connect bigquery://project/dataset --table <table>` (repeat `--table` for several): every later run covers only those. See [Choosing the tables](https://rbmuller.github.io/scherlok/getting-started/#choosing-the-tables).
 - Monitor cost via `region-X.INFORMATION_SCHEMA.JOBS_BY_USER` filtering `user_email = '<scherlok-sa-email>'` for the first week.
 - Schedule `watch` on the cadence that matches your data — daily for slow-moving marts, hourly for ingest tables. Each run repeats the same scans.
 
-A `maximum_bytes_billed` guard is on the roadmap to make per-query budget caps explicit. Until then, control cost via cadence + `--select` scoping.
+A `maximum_bytes_billed` guard is on the roadmap to make per-query budget caps explicit. Until then, control cost with the cadence and the tables you monitor (`connect --table`).
 
 ### `scherlok reconcile`
 
@@ -164,7 +164,7 @@ Notes for prod:
 These are honest gaps in v0.7.0, tracked openly so prospects can plan around them:
 
 - **Auth: ADC only.** Service-account JSON works via `GOOGLE_APPLICATION_CREDENTIALS` (because google-auth treats that as ADC), but there's no native `--service-account-json` flag. A first-class flag is a likely v0.8 addition — track via a new issue if you need it.
-- **Cost cap: not enforced.** No `maximum_bytes_billed` per query. Currently controllable via cadence + `--select` scoping. A `--max-bytes-billed` flag is the cleanest fix.
+- **Cost cap: not enforced.** No `maximum_bytes_billed` per query. Currently controllable via the cadence and `connect --table`. A `--max-bytes-billed` flag is the cleanest fix.
 - **Single dataset per connection.** A connection string addresses one project + one dataset. Cross-dataset profiling needs multiple `connect` invocations or running `dbt` mode where the manifest spans datasets.
 - **Region/location.** The connector lets `google-cloud-bigquery` discover the dataset's region. Multi-region datasets are fine; if you hit a region mismatch, the BQ error surfaces directly.
 

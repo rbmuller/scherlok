@@ -16,6 +16,7 @@ import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
+from scherlok.config import TABLES_SETTING, ScherlokConfig
 from scherlok.dbt import DEFAULT_TARGET_PATH, built_models, load_manifest
 
 pytestmark = pytest.mark.skipif(
@@ -228,6 +229,33 @@ def test_a_new_model_counts_as_just_built(warehouse, project):
     assert result.exit_code == 1
     assert payload["tables_without_baseline"] == ["new_orders"]
     assert [a["severity"] for a in payload["anomalies"]] == ["CRITICAL"]
+
+
+def _save_tables(*tables: str) -> None:
+    """What `scherlok connect --table` saves (#156); the connection stays in the env."""
+    ScherlokConfig(settings={TABLES_SETTING: list(tables)}).save()
+
+
+def test_the_dbt_run_decides_not_the_saved_tables(warehouse, project):
+    """`connect --table` says what is monitored; the dbt run says what was built (#156)."""
+    _save_tables("legacy_orders")
+    _write_artifacts(project, {"fct_orders": _model("fct_orders")}, {"fct_orders": "success"})
+    _, payload = _verify("--dbt-project", str(project))
+    assert payload["tables_verified"] == ["fct_orders"]
+
+
+def test_scherlok_dbt_ignores_the_saved_tables(warehouse, project):
+    _save_tables("legacy_orders")
+    _write_artifacts(project, {"fct_orders": _model("fct_orders")}, {"fct_orders": "success"})
+    (project / "dbt_project.yml").write_text(f"name: {PROJECT}\nprofile: {PROJECT}\n")
+
+    result = runner.invoke(app, [
+        "dbt", "--project-dir", str(project),
+        "--connection-string", f"duckdb:///{warehouse}", "--output", "json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert [model["physical"] for model in json.loads(result.stdout)["models"]] == ["fct_orders"]
 
 
 def test_table_and_dbt_project_add_up(warehouse, project):

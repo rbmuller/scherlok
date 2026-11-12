@@ -28,6 +28,10 @@ ENV_BASELINE_LOCKED = "SCHERLOK_BASELINE_LOCKED"
 BASELINE_LOCKED_SETTING = "baseline_locked"
 UNLOCKED_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
 
+# The tables `scherlok connect --table` chose to monitor (#156); None means
+# every table the connection lists.
+TABLES_SETTING = "tables"
+
 # config.json can hold a connection string with a password, so Scherlok's files
 # are owner-only rather than inheriting the umask (often world-readable).
 PRIVATE_DIR_MODE = 0o700
@@ -41,6 +45,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "slack_webhook_url": None,
     "store": None,
     BASELINE_LOCKED_SETTING: False,
+    TABLES_SETTING: None,
 }
 
 
@@ -102,6 +107,14 @@ class ScherlokConfig:
     def get_store(self) -> str | None:
         """Return remote store URL from env var or config."""
         return os.environ.get(ENV_STORE, self.settings.get("store"))
+
+    def saved_tables(self) -> list[str] | None:
+        """The tables saved with `scherlok connect --table`, or None for every table.
+
+        They are names, not a database: they apply to whichever connection
+        is in use, including SCHERLOK_CONNECTION.
+        """
+        return self.settings.get(TABLES_SETTING) or None
 
     def baseline_locked(self) -> bool:
         """True when only `scherlok accept` may write baselines (#109).

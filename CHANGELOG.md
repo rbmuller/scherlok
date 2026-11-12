@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Choose which tables to monitor** — `investigate`, `watch`, `ci` and `check` profiled every table in the connection's dataset or schema, so trying Scherlok on a few tables of a large BigQuery dataset paid for scanning all of them on every run. The BigQuery guide pointed to an `investigate --select` option that never existed. `scherlok connect <url> --table orders --table customers` now checks the names against the connection and saves them, while the dataset or schema stays in the connection string. `investigate`, `watch`, `ci`, `check`, `verify`, `status`, `report`, `dashboard` and the MCP `investigate`, `watch`, `check` and `verify` tools then cover only those tables, and `scherlok config` (`tables` in `--output json`) shows them. `investigate`, `watch`, `ci` and `check` gain `--table`, like `verify`, to run on other tables for one run. Connecting without `--table` monitors every table again. A saved table the connection no longer has fails the run before anything is profiled. Saved tables don't count as just built, so only `verify --table` escalates new-table findings to CRITICAL, and `scherlok dbt` and `verify --dbt-project` still take their tables from dbt. See [Choosing the tables](https://rbmuller.github.io/scherlok/getting-started/#choosing-the-tables). ([#156](https://github.com/rbmuller/scherlok/issues/156))
+
 ### Fixed
 - **GitHub Action: a description the Marketplace accepts** — the Marketplace refuses an action description of 125 characters or more, and `action.yml`'s had 132, so Scherlok Verify could not be listed. It now reads "Fail the pull request when data drifts from the learned Scherlok baseline, with one comment listing every anomaly." (114), and a test keeps it under the limit.
 

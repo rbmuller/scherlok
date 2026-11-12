@@ -41,6 +41,18 @@ scherlok watch                                    # detect anomalies
 
 The first `watch` after `investigate` compares against that baseline. Every run saves a new profile, so the baseline keeps learning, except from a run with a CRITICAL anomaly.
 
+### Choosing the tables
+
+The connection string names the dataset or schema, and every table in it is monitored. To monitor only some, name them when you connect:
+
+```bash
+scherlok connect bigquery://my-project/analytics --table orders --table customers
+```
+
+The names are checked against the connection first; an unknown one saves nothing. From then on `investigate`, `watch`, `ci`, `check`, `verify`, `status`, `report` and `dashboard` cover only those tables, as do the MCP `investigate`, `watch`, `check` and `verify` tools, and `scherlok config` shows them. A command's own `--table` (`tables` for an MCP tool) runs on the tables it names instead, for that run. Connecting again without `--table` monitors every table again.
+
+The list holds names, so it applies to whichever connection is in use, `SCHERLOK_CONNECTION` included. A saved table the connection no longer has fails the run with exit code 1 before anything is profiled, rather than being skipped. Saved tables don't count as just built: only the tables `verify --table` names do. `scherlok dbt`, `dbt-run-and-watch` and `verify --dbt-project` take their tables from dbt, not from this list.
+
 ## When the baseline does not learn
 
 A run that finds a CRITICAL anomaly on a table saves the anomaly but none of that table's profiles. The table keeps its baseline, so the alert repeats on every run until the data recovers, and the broken state never becomes the reference. Recovery needs no manual step: once the data is back, the next run passes and is learned again. WARNING and INFO findings are learned, as are the other tables of the same run.
@@ -63,7 +75,7 @@ scherlok history --approvals [--output json]
 
 The approvals table only grows: the store refuses to update or delete a row. `scherlok history --approvals` lists approvals, newest first; `--output json` prints the summaries in full.
 
-`scherlok investigate` also overwrites baselines, every table's, without asking or recording anything. Prefer `accept` for a change someone should be able to trace.
+`scherlok investigate` also overwrites baselines, those of every table it covers, without asking or recording anything. Prefer `accept` for a change someone should be able to trace.
 
 ### Locked baselines
 
@@ -109,6 +121,7 @@ The container defaults to UTC unless its local timezone has been configured.
 | What | Where | Override |
 |---|---|---|
 | Connection string | `~/.scherlok/config.json` | `SCHERLOK_CONNECTION` |
+| Tables to monitor (`connect --table`) | `~/.scherlok/config.json` | `--table` on each command |
 | Profiles and anomaly history | `~/.scherlok/profiles.db` (SQLite) | `scherlok config --store s3://...` or `SCHERLOK_STORE` |
 
 Remote stores (`s3://`, `gs://`, `az://`) let CI runners and teammates share one baseline; the file is synced down before a run and back up after it.

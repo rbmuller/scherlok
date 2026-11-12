@@ -97,6 +97,11 @@ def _baseline_locked() -> bool:
     return ScherlokConfig.load().baseline_locked()
 
 
+def _saved_tables() -> list[str] | None:
+    """The tables `scherlok connect --table` saved, covered when a tool names none (#156)."""
+    return ScherlokConfig.load().saved_tables()
+
+
 def _resolve_connection() -> str:
     """Return the server-side connection string or raise a clear, actionable error."""
     conn = ScherlokConfig.load().get_connection_string()
@@ -129,7 +134,9 @@ def _open_store(connection_string: str | None) -> ProfileStore:
 def _watch_tables(
     tables: list[str] | None, command: str, fail_on: str = FAIL_ON_CRITICAL
 ) -> tuple[int, list[dict]]:
-    """Profile, detect and save profiles and anomalies for `tables` (None = all).
+    """Profile, detect and save profiles and anomalies for `tables`.
+
+    None means the tables `scherlok connect --table` saved, else every table.
 
     A table with a CRITICAL anomaly keeps its baseline: its profiles are not
     saved, only the anomalies (#116); with baselines locked no profile is
@@ -139,7 +146,7 @@ def _watch_tables(
     `check` can decide the gate on every anomaly, not on the capped output.
     """
     connector = _connect()
-    targets = select_tables(tables, connector.list_tables())
+    targets = select_tables(tables or _saved_tables(), connector.list_tables())
     persist = not _baseline_locked()
     store = _open_store(connector.connection_string)
     try:
@@ -179,8 +186,9 @@ def list_tables() -> dict[str, Any]:
 def investigate(tables: list[str] | None = None) -> dict[str, Any]:
     """Profile tables and store them as the baseline for future anomaly checks.
 
-    Pass `tables` to limit to specific tables, or omit to profile everything
-    visible. The first profile of a table establishes its baseline; no
+    Pass `tables` to limit to specific tables, or omit to profile the tables
+    saved with `scherlok connect --table`, else everything visible. The
+    first profile of a table establishes its baseline; no
     anomalies are reported here. Run `watch` later to detect drift. A table
     whose current state has a CRITICAL anomaly against its baseline keeps that
     baseline, with `baseline_updated` false: a broken state is not learned.
@@ -190,7 +198,7 @@ def investigate(tables: list[str] | None = None) -> dict[str, Any]:
     if _baseline_locked():
         raise BaselineLockedError(BASELINE_LOCKED_MESSAGE)
     connector = _connect()
-    targets = select_tables(tables, connector.list_tables())
+    targets = select_tables(tables or _saved_tables(), connector.list_tables())
     store = _open_store(connector.connection_string)
     try:
         profiled = []
@@ -212,7 +220,8 @@ def watch(tables: list[str] | None = None) -> dict[str, Any]:
     Returns the anomalies found (type, severity, message per table), capped.
     Each also carries `column`, `metric`, `baseline`, `current`, `change_pct`
     and a fixed `hint` on where to look, null when one does not apply.
-    Pass `tables` to limit scope, or omit to watch everything. A table with no
+    Pass `tables` to limit scope, or omit to watch the tables saved with
+    `scherlok connect --table`, else everything. A table with no
     prior baseline gets the new-table checks instead (`empty_table`,
     `all_null_column`, `duplicate_key` as WARNING, `constant_column` as INFO),
     and its baseline is set for next time. A table with a CRITICAL anomaly
@@ -272,7 +281,10 @@ def history(days: int = 30) -> dict[str, Any]:
 
 
 def check(fail_on: str = FAIL_ON_CRITICAL) -> dict[str, Any]:
-    """Run a watch over all tables and return a CI-style pass/fail gate.
+    """Run a watch and return a CI-style pass/fail gate.
+
+    It covers the tables saved with `scherlok connect --table`, else every
+    table.
 
     `fail_on` is `"critical"` (default — fail only on CRITICAL) or `"warning"`
     (stricter — fail on WARNING or worse). Mirrors `scherlok ci`. Returns
@@ -302,7 +314,8 @@ def verify(
     Read-only, unlike `watch` and `check`: no profiles or anomalies are
     written, so retrying after a failure keeps failing until the data is
     fixed; only the run itself is recorded. Pass `tables` to limit scope, or
-    omit to verify everything. `fail_on` is `"critical"` (default) or
+    omit to verify the tables saved with `scherlok connect --table`, else
+    everything. `fail_on` is `"critical"` (default) or
     `"warning"`. Tables with no stored baseline are listed in
     `tables_without_baseline` and never counted as verified. Naming one in
     `tables` says it was just built, so an empty table, an all-NULL column or
@@ -332,7 +345,13 @@ def verify(
             ignored=ignored,
         )
         result = verify_tables(
-            connector, store, tables, threshold, against=scope, ignore=ignored
+            connector,
+            store,
+            tables,
+            threshold,
+            saved_tables=_saved_tables(),
+            against=scope,
+            ignore=ignored,
         )
         store.save_run(run.finish(result.tables_checked, result.anomalies).to_dict())
     finally:
