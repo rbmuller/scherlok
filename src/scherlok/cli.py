@@ -19,7 +19,12 @@ from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from scherlok import __version__
-from scherlok.alerter.console import print_anomalies, print_explanation, print_profile_summary
+from scherlok.alerter.console import (
+    SEVERITY_STYLES,
+    print_anomalies,
+    print_explanation,
+    print_profile_summary,
+)
 from scherlok.alerter.email import send_email_alert
 from scherlok.alerter.exitcode import (
     FAIL_ON_CHOICES,
@@ -2351,11 +2356,15 @@ def status(
             tbl.add_column("Last Anomaly")
             for r in records:
                 anomaly = r["last_anomaly"]
-                last = (
-                    f"{anomaly['type']} · {_relative_age(anomaly['detected_at'])}"
-                    if anomaly
-                    else ""
-                )
+                if anomaly:
+                    severity = Severity(anomaly["severity"])
+                    style = SEVERITY_STYLES[severity]
+                    last = (
+                        f"[{style}]{severity.value}[/{style}] {anomaly['type']} · "
+                        f"{_relative_age(anomaly['detected_at'])}"
+                    )
+                else:
+                    last = ""
                 tbl.add_row(
                     r["table"],
                     str(r["rows"]) if r["rows"] is not None else "—",

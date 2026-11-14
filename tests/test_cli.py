@@ -4,6 +4,7 @@ import json
 import re
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from scherlok.cli import app
@@ -290,7 +291,8 @@ class TestStatusJson:
         assert data[0]["table"] == "users"
         assert data[0]["status"] == "critical"
 
-    def test_text_shows_last_anomaly_column(self):
+    @pytest.mark.parametrize("severity", ["INFO", "WARNING", "CRITICAL"])
+    def test_text_shows_last_anomaly_severity_and_age(self, severity):
         from datetime import datetime, timedelta, timezone
 
         detected_at = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
@@ -309,7 +311,7 @@ class TestStatusJson:
             store.get_latest_anomaly_per_table.return_value = {
                 "users": {
                     "type": "volume_drop",
-                    "severity": "CRITICAL",
+                    "severity": severity,
                     "detected_at": detected_at,
                 }
             }
@@ -321,7 +323,7 @@ class TestStatusJson:
         assert result.exit_code == 0
         output = ANSI_RE.sub("", result.output)
         assert "Last Anomaly" in output
-        assert "volume_drop · 2h ago" in output
+        assert f"{severity} volume_drop · 2h ago" in output
 
     def test_text_leaves_last_anomaly_empty_without_anomalies(self):
         connector = _mock_connector()
