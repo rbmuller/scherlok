@@ -291,7 +291,9 @@ class TestStatusJson:
         assert data[0]["table"] == "users"
         assert data[0]["status"] == "critical"
 
-    @pytest.mark.parametrize("severity", ["INFO", "WARNING", "CRITICAL"])
+    @pytest.mark.parametrize(
+        "severity", ["INFO", "WARNING", "CRITICAL", "UNRECOGNIZED", "[bold]UNKNOWN[/bold]"]
+    )
     def test_text_shows_last_anomaly_severity_and_age(self, severity):
         from datetime import datetime, timedelta, timezone
 

@@ -2357,12 +2357,20 @@ def status(
             for r in records:
                 anomaly = r["last_anomaly"]
                 if anomaly:
-                    severity = Severity(anomaly["severity"])
-                    style = SEVERITY_STYLES[severity]
-                    last = (
-                        f"[{style}]{severity.value}[/{style}] {anomaly['type']} · "
-                        f"{_relative_age(anomaly['detected_at'])}"
-                    )
+                    raw_severity = anomaly["severity"]
+                    try:
+                        severity = Severity(raw_severity)
+                    except (TypeError, ValueError):
+                        last = (
+                            f"{rich_escape(str(raw_severity))} {anomaly['type']} · "
+                            f"{_relative_age(anomaly['detected_at'])}"
+                        )
+                    else:
+                        style = SEVERITY_STYLES[severity]
+                        last = (
+                            f"[{style}]{severity.value}[/{style}] {anomaly['type']} · "
+                            f"{_relative_age(anomaly['detected_at'])}"
+                        )
                 else:
                     last = ""
                 tbl.add_row(
