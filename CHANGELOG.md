@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Severity in `scherlok status`** — the Last Anomaly cell now shows the severity alongside each table's latest anomaly. Closes #102.
 - **New logo** — a lens with a red dot inside, the anomaly found, replaces the watercolor detective at the top of the README, in the docs header and favicon, and in the HTML dashboard. One file, `website/assets/scherlok-icon.svg`, serves the README and the docs, and the dashboard ships an identical copy. The docs take the logo's colours: a near-black header and teal links, in light and dark mode.
 
 ### Fixed
